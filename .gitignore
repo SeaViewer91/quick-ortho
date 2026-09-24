@@ -1,0 +1,30 @@
+# ── 내부 작업 문서 (GitHub에 올리지 않음) ──
+PROJECT_BRIEF.md
+DEV_LOG.md
+
+# ── 테스트 영상·산출물 (Releases로 별도 배포) ──
+data/
+samples/
+outputs/
+*.tif
+*.tiff
+
+# ── 비밀정보·로컬 설정 ──
+.env
+.env.*
+*.local.json
+
+# ── Node / 프론트엔드 ──
+node_modules/
+dist/
+
+# ── Rust / Tauri ──
+target/
+src-tauri/target/
+src-tauri/gen/
+
+# ── OS / 에디터 ──
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
