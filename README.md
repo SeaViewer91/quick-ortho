@@ -25,6 +25,32 @@
 - 데스크톱: [Tauri 2](https://tauri.app/) + React + TypeScript
 - 처리 엔진: Python([pycolmap](https://github.com/colmap/colmap)) 기반 사이드카
 
+## 개발 환경 구성
+
+필요 도구: Node.js LTS, Rust(stable), Python 3.10 이상
+([Tauri 사전 요구사항](https://tauri.app/start/prerequisites/) 참고)
+
+```bash
+# 데스크톱 앱 실행 (개발 모드)
+npm install
+npm run tauri dev
+
+# 처리 엔진 테스트
+cd engine
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+pytest
+```
+
+## 저장소 구조
+
+```
+src/          프론트엔드 (React + TypeScript)
+src-tauri/    데스크톱 셸 (Tauri 2, Rust)
+engine/       처리 엔진 사이드카 (Python)
+.github/      빌드 워크플로 (macOS arm64, Windows x64 설치파일 생성)
+```
+
 ## 라이선스
 
 [MIT](LICENSE)
