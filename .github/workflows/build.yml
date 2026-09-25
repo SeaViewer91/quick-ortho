@@ -10,8 +10,8 @@ jobs:
   engine-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: 엔진 테스트
@@ -32,9 +32,9 @@ jobs:
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: npm
@@ -54,7 +54,7 @@ jobs:
         run: npm run tauri build -- --target ${{ matrix.target }}
 
       - name: 설치파일 업로드
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: QuickOrtho-${{ matrix.target }}
           path: |
