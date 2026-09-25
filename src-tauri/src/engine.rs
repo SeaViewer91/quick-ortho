@@ -150,16 +150,25 @@ fn spawn_job(
 }
 
 /// 빠른 미리보기 실행. 결과는 `<폴더명>_QuickOrtho/preview`에 저장된다.
+/// `quicklook`이 false면 영상 디코딩 없이 촬영 범위·중복도만 계산한다 (데이터 불러오기).
 #[tauri::command]
-pub fn start_preview(app: AppHandle, state: State<EngineState>, folder: String) -> Result<JobInfo, String> {
+pub fn start_preview(
+    app: AppHandle,
+    state: State<EngineState>,
+    folder: String,
+    quicklook: Option<bool>,
+) -> Result<JobInfo, String> {
     let folder = PathBuf::from(folder);
     let out = default_output_dir(&folder, "preview")?;
-    let args = vec![
+    let mut args = vec![
         "preview".into(),
         folder.to_string_lossy().into(),
         "-o".into(),
         out.to_string_lossy().into(),
     ];
+    if !quicklook.unwrap_or(true) {
+        args.push("--skip-quicklook".into());
+    }
     let job_id = spawn_job(app, &state, args)?;
     Ok(JobInfo { job_id, output_dir: out.to_string_lossy().into() })
 }

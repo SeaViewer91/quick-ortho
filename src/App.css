@@ -259,3 +259,9 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
 }
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

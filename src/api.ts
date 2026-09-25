@@ -30,7 +30,7 @@ export type PreviewResult = {
   forward_overlap_median: number | null;
   flight_height_m: { min: number; max: number };
   gaps: number;
-  outputs: { quicklook: string; coverage: string; geojson: string };
+  outputs: { quicklook: string | null; coverage: string; geojson: string };
   warnings: string[];
   time_s: number;
 };
@@ -55,7 +55,8 @@ export type OrthoResult = {
 export type AppInfo = { name: string; version: string; os: string; arch: string };
 
 export const appInfo = () => invoke<AppInfo>("app_info");
-export const startPreview = (folder: string) => invoke<JobInfo>("start_preview", { folder });
+export const startPreview = (folder: string, quicklook: boolean) =>
+  invoke<JobInfo>("start_preview", { folder, quicklook });
 export const startOrtho = (folder: string, gsdScale?: number) =>
   invoke<JobInfo>("start_ortho", { folder, gsdScale });
 export const cancelEngine = (jobId: number) => invoke<void>("cancel_engine", { jobId });

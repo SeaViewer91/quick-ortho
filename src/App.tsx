@@ -20,7 +20,9 @@ import MapView, { type Layers, type Overlay } from "./MapView";
 import "./App.css";
 
 type Progress = { stage: string; message: string; current: number; total: number };
-type Busy = "preview" | "ortho" | null;
+type Busy = "load" | "quicklook" | "ortho" | null;
+
+const BUSY_TITLE = { load: "데이터 불러오기", quicklook: "간이 모자이크 생성", ortho: "정사 모자이크 생성" };
 
 const fmtArea = (m2: number) => (m2 >= 10000 ? `${(m2 / 10000).toFixed(2)} ha` : `${Math.round(m2)} m²`);
 const fmtRange = (a: number, b: number) =>
@@ -40,7 +42,7 @@ function App() {
   const [layers, setLayers] = useState<Layers>({
     quicklook: true,
     coverage: false,
-    footprints: false,
+    footprints: true,
     gaps: true,
     ortho: true,
   });
@@ -63,23 +65,50 @@ function App() {
     }
   };
 
-  async function runPreview(dir: string) {
-    setBusy("preview");
+  /** 데이터 불러오기: 영상 디코딩 없이 EXIF로 촬영 위치·범위·중복도만 계산한다. */
+  async function loadData(dir: string) {
+    setBusy("load");
     setError(null);
     setPreview(null);
     setOrtho(null);
     setOverlays({});
     setGeojson(undefined);
+    setLayers((l) => ({ ...l, footprints: true, quicklook: true, coverage: false }));
     try {
-      const res = await runJob<PreviewResult>(() => startPreview(dir), onEvent, (j) => (jobRef.current = j.job_id));
-      const [q, c, g] = await Promise.all([
-        readPng(res.outputs.quicklook),
-        readPng(res.outputs.coverage),
-        readJson<FeatureCollection>(res.outputs.geojson),
-      ]);
+      const res = await runJob<PreviewResult>(
+        () => startPreview(dir, false),
+        onEvent,
+        (j) => (jobRef.current = j.job_id),
+      );
+      const [c, g] = await Promise.all([readPng(res.outputs.coverage), readJson<FeatureCollection>(res.outputs.geojson)]);
       setPreview(res);
-      setOverlays({ quicklook: { url: q, corners: res.corners_lonlat }, coverage: { url: c, corners: res.corners_lonlat } });
+      setOverlays({ coverage: { url: c, corners: res.corners_lonlat } });
       setGeojson(g);
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(null);
+      setProgress(null);
+      jobRef.current = null;
+    }
+  }
+
+  /** 간이 모자이크: 사용자가 버튼으로 실행한다. */
+  async function makeQuicklook() {
+    if (!folder) return;
+    setBusy("quicklook");
+    setError(null);
+    try {
+      const res = await runJob<PreviewResult>(
+        () => startPreview(folder, true),
+        onEvent,
+        (j) => (jobRef.current = j.job_id),
+      );
+      if (!res.outputs.quicklook) throw new Error("간이 모자이크 결과가 없음");
+      const q = await readPng(res.outputs.quicklook);
+      setPreview(res);
+      setOverlays((o) => ({ ...o, quicklook: { url: q, corners: res.corners_lonlat } }));
+      setLayers((l) => ({ ...l, quicklook: true, footprints: false }));
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -93,7 +122,7 @@ function App() {
     const dir = await open({ directory: true, multiple: false, title: "드론 영상 폴더 선택" });
     if (typeof dir === "string") {
       setFolder(dir);
-      await runPreview(dir);
+      await loadData(dir);
     }
   }
 
@@ -145,7 +174,7 @@ function App() {
 
           {busy && (
             <section className="panel">
-              <h2>{busy === "preview" ? "빠른 미리보기" : "정사 모자이크 생성"}</h2>
+              <h2>{BUSY_TITLE[busy]}</h2>
               <p className="muted">{progress?.message ?? "시작하는 중"}</p>
               <div className="bar">
                 <div className={`bar-fill ${pct === null ? "indeterminate" : ""}`} style={{ width: `${pct ?? 30}%` }} />
@@ -197,9 +226,15 @@ function App() {
                 <dd>{preview.time_s.toFixed(1)}초</dd>
               </dl>
               <Warnings items={preview.warnings} />
-              <button type="button" onClick={runOrtho} disabled={busy !== null}>
-                {ortho ? "정사 모자이크 다시 생성" : "정사 모자이크 생성"}
-              </button>
+              <div className="actions">
+                <button type="button" className="secondary" onClick={makeQuicklook} disabled={busy !== null}>
+                  {overlays.quicklook ? "간이 모자이크 다시 생성" : "간이 모자이크 생성"}
+                </button>
+                <button type="button" onClick={runOrtho} disabled={busy !== null}>
+                  {ortho ? "정사 모자이크 다시 생성" : "정사 모자이크 생성"}
+                </button>
+              </div>
+              <p className="muted small">간이 모자이크는 수 초, 정사 모자이크는 수 분이 걸림</p>
             </section>
           )}
 
@@ -232,9 +267,11 @@ function App() {
           {(preview || ortho) && (
             <section className="panel">
               <h2>레이어</h2>
-              <label>
-                <input type="checkbox" checked={layers.quicklook} onChange={() => toggle("quicklook")} /> 간이 모자이크
-              </label>
+              {overlays.quicklook && (
+                <label>
+                  <input type="checkbox" checked={layers.quicklook} onChange={() => toggle("quicklook")} /> 간이 모자이크
+                </label>
+              )}
               {ortho && (
                 <label>
                   <input type="checkbox" checked={layers.ortho} onChange={() => toggle("ortho")} /> 정사 모자이크
@@ -263,7 +300,7 @@ function App() {
 
         <section className="map-wrap">
           <MapView {...overlays} geojson={geojson} layers={layers} />
-          {!preview && !busy && <div className="map-hint">영상 폴더를 선택하면 촬영 범위와 간이 모자이크가 표시됨</div>}
+          {!preview && !busy && <div className="map-hint">영상 폴더를 선택하면 촬영 위치와 범위가 표시됨</div>}
         </section>
       </main>
 
