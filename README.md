@@ -2,7 +2,7 @@
 
 현장 노트북에서 인터넷 없이 드론 영상으로 정사 모자이크(GeoTIFF)를 생성하는 데스크톱 앱임.
 
-> 🚧 사전 릴리스 단계임. 검증 기종은 DJI Mavic 2 Pro이며 다른 기종은 검증 중임.
+> 검증 기종은 DJI Mavic 2 Pro이며 다른 기종은 검증 중임.
 
 ## 주요 기능
 
@@ -82,7 +82,8 @@ docs/         사용 매뉴얼, 릴리스 노트
    `engine/quickortho_engine/__init__.py`의 버전을 올림
 2. `docs/release-notes/v<버전>.md`에 릴리스 노트를 작성함
 3. 커밋·push 후 태그를 push함: `git tag v<버전> && git push origin v<버전>`
-4. CI가 태그와 버전 일치를 확인하고, 설치파일을 빌드해 사전 릴리스로 게시함
+4. CI가 태그와 버전 일치를 확인하고, 설치파일을 빌드해 정식 릴리스(최신)로 게시함.
+   시험용으로 올릴 때는 게시 후 `gh release edit v<버전> --prerelease`로 사전 릴리스로 바꿈
 
 ## 라이선스
 
