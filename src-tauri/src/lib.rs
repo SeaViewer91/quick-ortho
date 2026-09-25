@@ -1,3 +1,6 @@
+mod engine;
+mod files;
+
 use serde::Serialize;
 
 /// 앱·실행 환경 정보. 프론트엔드와 Rust 간 IPC 동작 확인 및 진단용.
@@ -23,7 +26,17 @@ fn app_info() -> AppInfo {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![app_info])
+        .plugin(tauri_plugin_dialog::init())
+        .manage(engine::EngineState::default())
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            engine::engine_info,
+            engine::start_preview,
+            engine::start_ortho,
+            engine::cancel_engine,
+            files::read_png_data_url,
+            files::read_result_json,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

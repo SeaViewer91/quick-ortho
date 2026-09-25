@@ -27,20 +27,30 @@
 
 ## 개발 환경 구성
 
-필요 도구: Node.js LTS, Rust(stable), Python 3.10 이상
+필요 도구: Node.js LTS, Rust(stable), Python 3.10~3.13
 ([Tauri 사전 요구사항](https://tauri.app/start/prerequisites/) 참고)
 
 ```bash
-# 데스크톱 앱 실행 (개발 모드)
+# 1) 처리 엔진 가상환경 (앱이 개발 모드에서 engine/.venv의 파이썬을 자동으로 사용함)
+cd engine
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"          # Windows: .venv\Scripts\pip install -e ".[dev]"
+.venv/bin/pytest                           # 엔진 테스트
+cd ..
+
+# 2) 데스크톱 앱 실행 (개발 모드)
 npm install
 npm run tauri dev
-
-# 처리 엔진 테스트
-cd engine
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-pytest
 ```
+
+- 엔진 실행 파일을 직접 지정하려면 환경변수 `QUICKORTHO_ENGINE`에 경로를 설정함
+- 결과는 영상 폴더 옆의 `<폴더명>_QuickOrtho/` 아래에 저장됨 (`preview/`, `ortho/`)
+
+## 사용 방법 (개발 버전)
+
+1. **영상 폴더 선택**: 폴더를 고르면 빠른 미리보기가 자동 실행되어 수 초 내에 촬영 범위, 간이 모자이크, 누락 구역이 지도에 표시됨
+2. **촬영 상태 확인**: 누락 구역, 중복 매수, 전방 중복률을 확인하고 필요하면 재촬영함
+3. **정사 모자이크 생성**: SfM 기반 정사 모자이크(GeoTIFF)를 생성하고 지도에 겹쳐 표시함
 
 ## 저장소 구조
 

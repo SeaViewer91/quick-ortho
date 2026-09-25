@@ -7,6 +7,8 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react()],
+  // 데스크톱 앱이라 번들 크기 경고 기준을 높임 (지도 라이브러리 포함 약 1.3 MB)
+  build: { chunkSizeWarningLimit: 2000 },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
