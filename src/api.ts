@@ -43,13 +43,14 @@ export type OrthoResult = {
     mean_reprojection_error_px: number;
     mapper: string;
   };
-  georef: { epsg: number; gps_residual_rms_m: number };
+  georef: { epsg: number; gps_residual_rms_m?: number; mode?: "gps" | "gcp" | "gcp_shift"; note?: string };
   ortho: { width: number; height: number; gsd_m: number };
   outputs: { orthomosaic: string; dsm: string; preview: string };
   preview_corners_lonlat: Corners;
   timings_s: { total_s: number };
   peak_memory_mb: number;
   warnings: string[];
+  refine?: RefineInfo;
 };
 
 export type AppInfo = { name: string; version: string; os: string; arch: string };
@@ -126,6 +127,180 @@ export async function runJob<T>(
   }
 }
 
+// ───────────────────────── 정밀 보정 ─────────────────────────
+
+export type Mark = { image: string; x: number; y: number };
+export type GcpRole = "control" | "check";
+export type Gcp = { name: string; x: number; y: number; z: number; epsg: number; role: GcpRole; obs: Mark[] };
+export type TiePoint = { id: string; obs: Mark[] };
+export type Edits = {
+  version: number;
+  deleted_points: number[];
+  max_reproj_error_px: number | null;
+  tiepoints: TiePoint[];
+  gcps: Gcp[];
+};
+export type EpsgPreset = { epsg: number; label: string };
+
+export type ProjectInfo =
+  | { exists: false; epsg_presets: EpsgPreset[] }
+  | {
+      exists: true;
+      image_dir: string;
+      source: "base" | "refined";
+      frame: { epsg: number; origin: number[]; name: string };
+      vertical: "gps" | "gcp";
+      images: { name: string; registered: boolean; width: number; height: number }[];
+      edits: Edits;
+      gcp_lonlat: [number, number][];
+      epsg_presets: EpsgPreset[];
+    };
+
+export type Chip = { path: string; x0: number; y0: number; size: number };
+export type Candidate = {
+  image: string;
+  x: number;
+  y: number;
+  center_dist: number;
+  marked: boolean;
+  width: number;
+  height: number;
+  chip?: Chip;
+};
+export type Prediction = {
+  method: "triangulated" | "survey" | "survey_dsm" | "dsm" | null;
+  point?: { x: number; y: number; z: number; epsg: number; lon: number; lat: number };
+  residuals_px?: Record<string, number | null>;
+  candidates: Candidate[];
+};
+export type PredictSpec = {
+  marks: Mark[];
+  world?: { x: number; y: number; z: number; epsg: number; z_from_dsm?: boolean };
+  chips?: boolean;
+};
+
+export type ReprojStats = {
+  num_points: number;
+  num_observations: number;
+  mean_px: number;
+  rmse_px: number;
+  p95_px: number;
+  max_px?: number;
+};
+export type TiepointStats = {
+  source: "base" | "refined";
+  summary: ReprojStats;
+  histogram: { edges: number[]; counts: number[] };
+  threshold_preview: { threshold_px: number; removed_obs: number; removed_ratio: number; rmse_px_after: number }[];
+  recommended_px: number;
+  worst: {
+    id: number;
+    error_px: number;
+    max_px: number;
+    track: number;
+    lon: number;
+    lat: number;
+    z: number;
+    manual: string | null;
+  }[];
+  per_image: { name: string; num_obs: number; rmse_px: number | null }[];
+  map_points: [number, number, number, number][];
+  deleted_points: number[];
+};
+
+export type GcpParse = {
+  encoding: string;
+  delimiter: string;
+  header: string[] | null;
+  num_columns: number;
+  numeric: boolean[];
+  rows: string[][];
+  num_rows: number;
+  guess: { name: number | null; x: number | null; y: number | null; z: number | null; epsg?: number | null; distance_km?: number | null };
+  epsg_presets: EpsgPreset[];
+};
+
+export type GcpRow = {
+  name: string;
+  role: GcpRole;
+  num_marks: number;
+  num_used: number;
+  dx: number | null;
+  dy: number | null;
+  dz: number | null;
+  dxy: number | null;
+  d3: number | null;
+  reproj_px: number | null;
+  marks?: { image: string; reproj_px: number | null }[];
+};
+export type GcpSummary = {
+  count: number;
+  rmse_x: number;
+  rmse_y: number;
+  rmse_z: number;
+  rmse_xy: number;
+  rmse_3d: number;
+} | null;
+export type RefineInfo = {
+  mode: "gps" | "gcp" | "gcp_shift";
+  epsg: number;
+  crs_name: string;
+  num_control?: number;
+  intrinsics_refined?: boolean;
+  gps_residual_rms_m?: number;
+  shift_m?: number[];
+  deleted_points: number;
+  filtered_observations: number;
+  max_reproj_error_px: number | null;
+  manual_tiepoints: { id: string; point_id: number; error_px: number; marks: { image: string; reproj_px: number | null }[] }[];
+  before: ReprojStats;
+  after: ReprojStats;
+  gcps: GcpRow[];
+  gcp_summary: { control: GcpSummary; check: GcpSummary };
+  timings_s: Record<string, number>;
+  warnings: string[];
+};
+
+export const startProjectTask = (command: string, orthoDir: string, args?: string[]) =>
+  invoke<JobInfo>("start_project_task", { command, orthoDir, args });
+export const startGcpParse = (file: string, orthoDir?: string, encoding?: string, delimiter?: string) =>
+  invoke<JobInfo>("start_gcp_parse", { file, orthoDir, encoding, delimiter });
+export const allowProjectImages = (orthoDir: string) => invoke<string>("allow_project_images", { orthoDir });
+
+// 엔진은 한 번에 작업 하나만 받으므로 짧은 조회 작업은 순서대로 보낸다
+let chain: Promise<unknown> = Promise.resolve();
+export function queued<T>(fn: () => Promise<T>): Promise<T> {
+  const p = chain.then(fn, fn);
+  chain = p.catch(() => undefined);
+  return p;
+}
+
+const quick = <T>(start: () => Promise<JobInfo>) => queued(() => runJob<T>(start, () => undefined));
+
+export const projectInfo = (orthoDir: string) => quick<ProjectInfo>(() => startProjectTask("project-info", orthoDir));
+export const tiepointStats = (orthoDir: string) => quick<TiepointStats>(() => startProjectTask("tiepoints", orthoDir));
+export const predictPoint = (orthoDir: string, spec: PredictSpec) =>
+  quick<Prediction>(() => startProjectTask("predict", orthoDir, ["--spec", JSON.stringify(spec)]));
+export const saveEdits = (orthoDir: string, edits: Edits) =>
+  quick<Edits>(() => startProjectTask("edits-save", orthoDir, ["--edits", JSON.stringify(edits)]));
+export const parseGcpFile = (file: string, orthoDir?: string, encoding?: string, delimiter?: string) =>
+  quick<GcpParse>(() => startGcpParse(file, orthoDir, encoding, delimiter));
+
+/** 영상 폴더에 대응하는 결과 폴더: `<상위>/<폴더명>_QuickOrtho/<작업>` (Rust default_output_dir과 같은 규칙) */
+export function resultDir(folder: string, task: "preview" | "ortho"): string {
+  const sep = folder.includes("\\") && !folder.includes("/") ? "\\" : "/";
+  const trimmed = folder.replace(/[\\/]+$/, "");
+  const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  const parent = trimmed.slice(0, i);
+  const name = trimmed.slice(i + 1);
+  return [parent, `${name}_QuickOrtho`, task].join(sep);
+}
+
+export const joinPath = (dir: string, name: string) => {
+  const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+  return dir.replace(/[\\/]+$/, "") + sep + name;
+};
+
 export const STAGE_LABELS: Record<string, string> = {
   scan: "영상 스캔",
   footprints: "촬영 범위 계산",
@@ -137,4 +312,5 @@ export const STAGE_LABELS: Record<string, string> = {
   dsm: "간이 DSM",
   ortho: "정사투영",
   finalize: "마무리",
+  refine: "정밀 보정",
 };

@@ -8,7 +8,9 @@ import {
   engineStatus,
   onEngineReady,
   readJson,
+  joinPath,
   readPng,
+  resultDir,
   runJob,
   startOrtho,
   startPreview,
@@ -20,6 +22,7 @@ import {
   type PreviewResult,
 } from "./api";
 import MapView, { type Layers, type Overlay } from "./MapView";
+import RefineView from "./refine/RefineView";
 import "./App.css";
 
 type Progress = { stage: string; message: string; current: number; total: number };
@@ -50,6 +53,7 @@ function App() {
     gaps: true,
     ortho: true,
   });
+  const [refineOpen, setRefineOpen] = useState(false);
   const jobRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -80,6 +84,7 @@ function App() {
   /** 데이터 불러오기: 영상 디코딩 없이 EXIF로 촬영 위치·범위·중복도만 계산한다. */
   async function loadData(dir: string) {
     setBusy("load");
+    setRefineOpen(false);
     setError(null);
     setPreview(null);
     setOrtho(null);
@@ -96,6 +101,7 @@ function App() {
       setPreview(res);
       setOverlays({ coverage: { url: c, corners: res.corners_lonlat } });
       setGeojson(g);
+      await loadExistingOrtho(dir);
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     } finally {
@@ -103,6 +109,26 @@ function App() {
       setProgress(null);
       jobRef.current = null;
     }
+  }
+
+  /** 이전에 만든 정사 모자이크가 있으면 불러온다 (보정 작업을 이어서 하기 위해). */
+  async function loadExistingOrtho(dir: string) {
+    try {
+      const rep = await readJson<OrthoResult>(joinPath(resultDir(dir, "ortho"), "report.json"));
+      const url = await readPng(rep.outputs.preview);
+      setOrtho(rep);
+      setOverlays((o) => ({ ...o, ortho: { url, corners: rep.preview_corners_lonlat } }));
+      setLayers((l) => ({ ...l, ortho: true, coverage: false }));
+    } catch {
+      // 이전 결과가 없음
+    }
+  }
+
+  /** 정밀 보정 결과를 반영한다. */
+  async function applyRefined(rep: OrthoResult) {
+    const url = await readPng(rep.outputs.preview);
+    setOrtho(rep);
+    setOverlays((o) => ({ ...o, ortho: { url, corners: rep.preview_corners_lonlat } }));
   }
 
   /** 간이 모자이크: 사용자가 버튼으로 실행한다. */
@@ -171,6 +197,17 @@ function App() {
         <span className="subtitle">드론 영상 정사 모자이크</span>
       </header>
 
+      {refineOpen && ortho && folder ? (
+        <main className="app-main refine-main">
+          <RefineView
+            orthoDir={resultDir(folder, "ortho")}
+            ortho={ortho}
+            overlay={overlays.ortho}
+            onClose={() => setRefineOpen(false)}
+            onRefined={applyRefined}
+          />
+        </main>
+      ) : (
       <main className="app-main">
         <aside className="side">
           <section className="panel">
@@ -261,18 +298,48 @@ function App() {
                 <dt>GSD</dt>
                 <dd>{(ortho.ortho.gsd_m * 100).toFixed(1)} cm</dd>
                 <dt>재투영 오차</dt>
-                <dd>{ortho.sfm.mean_reprojection_error_px.toFixed(2)} px</dd>
-                <dt>GPS 잔차</dt>
-                <dd>{ortho.georef.gps_residual_rms_m.toFixed(2)} m</dd>
+                <dd>
+                  {ortho.refine
+                    ? `RMSE ${ortho.refine.after.rmse_px.toFixed(2)} px (보정)`
+                    : `${ortho.sfm.mean_reprojection_error_px.toFixed(2)} px`}
+                </dd>
+                <dt>좌표 기준</dt>
+                <dd>
+                  {ortho.refine?.mode === "gcp"
+                    ? "GCP"
+                    : ortho.refine?.mode === "gcp_shift"
+                      ? "GCP (이동만)"
+                      : "GPS"}{" "}
+                  · EPSG:{ortho.georef.epsg}
+                </dd>
+                {ortho.refine?.gcp_summary?.check ? (
+                  <>
+                    <dt>검사점 RMSE</dt>
+                    <dd>
+                      수평 {ortho.refine.gcp_summary.check.rmse_xy.toFixed(3)} · 수직{" "}
+                      {ortho.refine.gcp_summary.check.rmse_z.toFixed(3)} m
+                    </dd>
+                  </>
+                ) : ortho.georef.gps_residual_rms_m !== undefined ? (
+                  <>
+                    <dt>GPS 잔차</dt>
+                    <dd>{ortho.georef.gps_residual_rms_m.toFixed(2)} m</dd>
+                  </>
+                ) : null}
                 <dt>처리 시간</dt>
                 <dd>{Math.round(ortho.timings_s.total_s)}초</dd>
                 <dt>최대 메모리</dt>
                 <dd>{(ortho.peak_memory_mb / 1024).toFixed(2)} GB</dd>
               </dl>
               <Warnings items={ortho.warnings} />
-              <button type="button" className="secondary" onClick={() => revealItemInDir(ortho.outputs.orthomosaic)}>
-                결과 폴더 열기
-              </button>
+              <div className="actions">
+                <button type="button" onClick={() => setRefineOpen(true)} disabled={busy !== null}>
+                  정밀 보정 (GCP·타이포인트)
+                </button>
+                <button type="button" className="secondary" onClick={() => revealItemInDir(ortho.outputs.orthomosaic)}>
+                  결과 폴더 열기
+                </button>
+              </div>
             </section>
           )}
 
@@ -315,6 +382,7 @@ function App() {
           {!preview && !busy && <div className="map-hint">영상 폴더를 선택하면 촬영 위치와 범위가 표시됨</div>}
         </section>
       </main>
+      )}
 
       <footer className="app-footer">
         {info && (

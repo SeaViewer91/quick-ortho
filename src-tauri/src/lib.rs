@@ -40,6 +40,9 @@ pub fn run() {
             engine::start_preview,
             engine::start_ortho,
             engine::cancel_engine,
+            engine::start_project_task,
+            engine::start_gcp_parse,
+            files::allow_project_images,
             files::read_png_data_url,
             files::read_result_json,
         ])

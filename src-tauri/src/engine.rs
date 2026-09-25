@@ -314,6 +314,73 @@ pub fn start_ortho<R: Runtime>(
     Ok(JobInfo { job_id, output_dir: out.to_string_lossy().into() })
 }
 
+/// 정밀 보정 작업 (정사 모자이크 결과 폴더 기준).
+///
+/// 허용 명령과 인자
+/// - `project-info`, `tiepoints`: 추가 인자 없음
+/// - `predict`: `["--spec", JSON]`
+/// - `edits-save`: `["--edits", JSON]`
+/// - `refine`: `[]` 또는 `["--reset"]`
+#[tauri::command]
+pub fn start_project_task<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<EngineState>,
+    command: String,
+    ortho_dir: String,
+    args: Option<Vec<String>>,
+) -> Result<JobInfo, String> {
+    let args = args.unwrap_or_default();
+    validate_project_task(&command, &ortho_dir, &args)?;
+    let mut argv = vec![command, ortho_dir.clone()];
+    argv.extend(args);
+    let job_id = submit(&app, &state, argv)?;
+    Ok(JobInfo { job_id, output_dir: ortho_dir })
+}
+
+fn validate_project_task(command: &str, ortho_dir: &str, args: &[String]) -> Result<(), String> {
+    crate::files::ensure_result_dir(Path::new(ortho_dir))?;
+    let ok = match command {
+        "project-info" | "tiepoints" => args.is_empty(),
+        "predict" => args.len() == 2 && args[0] == "--spec",
+        "edits-save" => args.len() == 2 && args[0] == "--edits",
+        "refine" => args.is_empty() || (args.len() == 1 && args[0] == "--reset"),
+        _ => return Err(format!("지원하지 않는 보정 명령: {command}")),
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("{command} 명령의 인자가 올바르지 않음"))
+    }
+}
+
+/// GCP 측량 성과 파일(CSV·TXT)을 읽는다. `ortho_dir`을 주면 프로젝트 위치로 좌표계를 추정한다.
+#[tauri::command]
+pub fn start_gcp_parse<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<EngineState>,
+    file: String,
+    ortho_dir: Option<String>,
+    encoding: Option<String>,
+    delimiter: Option<String>,
+) -> Result<JobInfo, String> {
+    let mut argv = vec!["gcp-parse".to_string(), file];
+    if let Some(d) = &ortho_dir {
+        crate::files::ensure_result_dir(Path::new(d))?;
+        argv.push("--ortho".into());
+        argv.push(d.clone());
+    }
+    if let Some(e) = encoding {
+        argv.push("--encoding".into());
+        argv.push(e);
+    }
+    if let Some(d) = delimiter {
+        argv.push("--delimiter".into());
+        argv.push(d);
+    }
+    let job_id = submit(&app, &state, argv)?;
+    Ok(JobInfo { job_id, output_dir: ortho_dir.unwrap_or_default() })
+}
+
 /// 실행 중인 작업을 중단한다. 엔진을 종료한 뒤 곧바로 새로 띄워 다음 작업에 대비한다.
 #[tauri::command]
 pub fn cancel_engine<R: Runtime>(app: AppHandle<R>, state: State<EngineState>, job_id: u64) -> Result<(), String> {
@@ -350,6 +417,22 @@ pub fn engine_status<R: Runtime>(app: AppHandle<R>, state: State<EngineState>) -
         "ready": sh.ready,
         "command": program.to_string_lossy(),
     })
+}
+
+#[cfg(test)]
+mod task_tests {
+    use super::validate_project_task;
+
+    #[test]
+    fn project_task_whitelist() {
+        let d = "/a/imgs_QuickOrtho/ortho";
+        assert!(validate_project_task("tiepoints", d, &[]).is_ok());
+        assert!(validate_project_task("predict", d, &["--spec".into(), "{}".into()]).is_ok());
+        assert!(validate_project_task("refine", d, &["--reset".into()]).is_ok());
+        assert!(validate_project_task("refine", d, &["--x".into()]).is_err());
+        assert!(validate_project_task("ortho", d, &[]).is_err());
+        assert!(validate_project_task("tiepoints", "/a/imgs/ortho", &[]).is_err());
+    }
 }
 
 #[cfg(test)]

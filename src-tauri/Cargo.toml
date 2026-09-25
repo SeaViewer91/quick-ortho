@@ -1,6 +1,6 @@
 [package]
 name = "quick-ortho"
-version = "0.1.0"
+version = "0.2.0"
 description = "Offline drone orthomosaic generator for field laptops"
 authors = ["Suho Bak"]
 license = "MIT"
@@ -20,7 +20,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 base64 = "0.22"
@@ -29,7 +29,7 @@ serde_json = "1"
 
 
 [dev-dependencies]
-tauri = { version = "2", features = ["test"] }
+tauri = { version = "2", features = ["test", "protocol-asset"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

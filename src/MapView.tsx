@@ -14,12 +14,21 @@ export type Layers = {
   ortho: boolean;
 };
 
+export type MapLabel = { lon: number; lat: number; text: string; kind: "control" | "check" | "pick" | "active" };
+export type MapHit = { kind: string; id?: number } | null;
+
 type Props = {
   quicklook?: Overlay;
   coverage?: Overlay;
   ortho?: Overlay;
   geojson?: FeatureCollection;
   layers: Layers;
+  /** 정밀 보정: 타이포인트 오차 점 (properties: err, id, sel) */
+  points?: FeatureCollection;
+  /** 정밀 보정: GCP 등 이름표가 붙는 점 */
+  labels?: MapLabel[];
+  onClick?: (lngLat: [number, number], hit: MapHit) => void;
+  crosshair?: boolean;
 };
 
 const EMPTY: FeatureCollection = { type: "FeatureCollection", features: [] };
@@ -37,10 +46,13 @@ const IMAGE_LAYERS = [
   ["coverage", "coverage"],
 ] as const;
 
-export default function MapView({ quicklook, coverage, ortho, geojson, layers }: Props) {
+export default function MapView({ quicklook, coverage, ortho, geojson, layers, points, labels, onClick, crosshair }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MlMap | null>(null);
   const ready = useRef<Promise<void> | null>(null);
+  const clickRef = useRef(onClick);
+  clickRef.current = onClick;
+  const markers = useRef<maplibregl.Marker[]>([]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -83,6 +95,43 @@ export default function MapView({ quicklook, coverage, ortho, geojson, layers }:
         source: "vectors",
         filter: ["==", ["get", "kind"], "gap"],
         paint: { "line-color": "#5a1e8c", "line-width": 2 },
+      });
+      m.addSource("points", { type: "geojson", data: EMPTY });
+      m.addLayer({
+        id: "err-points",
+        type: "circle",
+        source: "points",
+        paint: {
+          "circle-radius": ["case", ["get", "sel"], 6, 2.5],
+          "circle-color": [
+            "interpolate",
+            ["linear"],
+            ["get", "err"],
+            0,
+            "#2e8b57",
+            1,
+            "#e6c828",
+            2,
+            "#f08c1e",
+            4,
+            "#dc322f",
+          ],
+          "circle-stroke-color": ["case", ["get", "sel"], "#000", "rgba(0,0,0,0)"],
+          "circle-stroke-width": ["case", ["get", "sel"], 2, 0],
+        },
+      });
+      m.on("click", (e) => {
+        const cb = clickRef.current;
+        if (!cb) return;
+        const hits = m.queryRenderedFeatures(
+          [
+            [e.point.x - 4, e.point.y - 4],
+            [e.point.x + 4, e.point.y + 4],
+          ],
+          { layers: ["err-points"] },
+        );
+        const f = hits[0];
+        cb([e.lngLat.lng, e.lngLat.lat], f ? { kind: "err", id: Number(f.properties?.id) } : null);
       });
     });
     map.current = m;
@@ -153,6 +202,33 @@ export default function MapView({ quicklook, coverage, ortho, geojson, layers }:
       set("gaps-line", layers.gaps);
     });
   }, [layers, quicklook, ortho, coverage]);
+
+  useEffect(() => {
+    ready.current?.then(() => {
+      (map.current?.getSource("points") as GeoJSONSource | undefined)?.setData(points ?? EMPTY);
+    });
+  }, [points]);
+
+  useEffect(() => {
+    ready.current?.then(() => {
+      const m = map.current;
+      if (!m) return;
+      markers.current.forEach((mk) => mk.remove());
+      markers.current = (labels ?? []).map((l) => {
+        const el = document.createElement("div");
+        el.className = `map-label ${l.kind}`;
+        el.textContent = l.text;
+        return new maplibregl.Marker({ element: el, anchor: "bottom-left", offset: [-5, 5] }).setLngLat([l.lon, l.lat]).addTo(m);
+      });
+    });
+  }, [labels]);
+
+  useEffect(() => {
+    ready.current?.then(() => {
+      const c = map.current?.getCanvas();
+      if (c) c.style.cursor = crosshair ? "crosshair" : "";
+    });
+  }, [crosshair]);
 
   return <div ref={container} className="map" />;
 }
