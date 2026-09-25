@@ -2,7 +2,7 @@
 
 현장 노트북에서 인터넷 없이 드론 영상으로 정사 모자이크(GeoTIFF)를 생성하는 데스크톱 앱임.
 
-> 🚧 개발 초기 단계임. 아직 사용 가능한 릴리스는 없음.
+> 🚧 사전 릴리스 단계임. 검증 기종은 DJI Mavic 2 Pro이며 다른 기종은 검증 중임.
 
 ## 주요 기능 (계획)
 
@@ -25,25 +25,16 @@
 - 데스크톱: [Tauri 2](https://tauri.app/) + React + TypeScript
 - 처리 엔진: Python([pycolmap](https://github.com/colmap/colmap)) 기반 사이드카
 
-## 설치 (개발 빌드)
+## 설치와 사용
 
-정식 릴리스 전까지는 GitHub Actions 빌드 결과물로 설치함.
-저장소 **Actions → build → 최근 성공한 실행 → Artifacts**에서 OS별 파일을 받음. 처리 엔진이 포함되어 있어 Python 설치가 필요 없음.
+[Releases](https://github.com/SeaViewer91/quick-ortho/releases)에서 OS별 설치파일을 받음. 처리 엔진이 포함되어 있어 Python 설치가 필요 없음.
 
-| OS | 파일 | 요구 사항 |
-|---|---|---|
-| macOS (Apple Silicon) | `QuickOrtho-aarch64-apple-darwin` 안의 `.dmg` | macOS 14(Sonoma) 이상 |
-| Windows 10/11 (x64) | `QuickOrtho-x86_64-pc-windows-msvc` 안의 `.msi` 또는 `-setup.exe` | - |
+| OS | 요구 사항 |
+|---|---|
+| macOS (Apple Silicon) | macOS 14(Sonoma) 이상 |
+| Windows 10 / 11 (x64) | - |
 
-- 설치파일은 약 200~300 MB임 (SfM·영상 처리 라이브러리 포함)
-- 코드 서명을 하지 않은 빌드이므로 처음 실행 시 경고가 나옴
-  - macOS: 앱을 응용 프로그램 폴더로 옮긴 뒤 터미널에서 다음을 한 번 실행함
-
-    ```bash
-    xattr -dr com.apple.quarantine /Applications/QuickOrtho.app
-    ```
-
-  - Windows: SmartScreen 경고에서 **추가 정보 → 실행**을 누름
+설치 방법, 사용 순서, 결과 파일, 문제 해결은 [사용 매뉴얼](docs/MANUAL.md)을 참고함.
 
 ## 개발 환경 구성
 
@@ -79,8 +70,17 @@ npm run tauri dev
 src/          프론트엔드 (React + TypeScript)
 src-tauri/    데스크톱 셸 (Tauri 2, Rust)
 engine/       처리 엔진 사이드카 (Python)
-.github/      빌드 워크플로 (macOS arm64, Windows x64 설치파일 생성)
+.github/      빌드 워크플로 (macOS arm64, Windows x64 설치파일 생성, v* 태그 시 릴리스)
+docs/         사용 매뉴얼, 릴리스 노트
 ```
+
+## 릴리스 절차
+
+1. `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `package.json`, `engine/pyproject.toml`,
+   `engine/quickortho_engine/__init__.py`의 버전을 올림
+2. `docs/release-notes/v<버전>.md`에 릴리스 노트를 작성함
+3. 커밋·push 후 태그를 push함: `git tag v<버전> && git push origin v<버전>`
+4. CI가 태그와 버전 일치를 확인하고, 설치파일을 빌드해 사전 릴리스로 게시함
 
 ## 라이선스
 
