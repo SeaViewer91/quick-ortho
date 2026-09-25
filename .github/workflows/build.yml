@@ -1,10 +1,19 @@
 name: build
 
-# 수동 실행(Actions 탭 → build → Run workflow) 또는 v* 태그 push 시 실행
+# main 브랜치 push, v* 태그 push, 수동 실행(Actions 탭 → build → Run workflow) 시 실행
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+
+# 같은 브랜치에 새 push가 오면 이전 실행은 취소함
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   engine-test:
