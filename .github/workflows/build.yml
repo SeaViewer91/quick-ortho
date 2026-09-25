@@ -56,11 +56,33 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: 엔진 번들 (PyInstaller onedir)
+        working-directory: engine
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller .
+          pyinstaller -y --log-level WARN quickortho-engine.spec
+
+      - name: 엔진 번들 동작 확인
+        shell: bash
+        working-directory: engine/dist/quickortho-engine
+        run: |
+          ./quickortho-engine version
+          printf '{"job":1,"argv":["version"]}\n' | ./quickortho-engine serve | tee serve.log
+          grep -q '"ok": true' serve.log
+          grep -q '"type": "done", "job": 1, "code": 0' serve.log
+          rm serve.log
+          du -sh .
+
       - name: 프론트엔드 의존성 설치
         run: npm ci
 
-      - name: 앱 빌드
-        run: npm run tauri build -- --target ${{ matrix.target }}
+      - name: 앱 빌드 (엔진 포함)
+        run: npm run tauri build -- --target ${{ matrix.target }} --config src-tauri/tauri.bundle.conf.json
 
       - name: 설치파일 업로드
         uses: actions/upload-artifact@v5

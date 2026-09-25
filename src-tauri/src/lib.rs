@@ -28,15 +28,26 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(engine::EngineState::default())
+        .setup(|app| {
+            // 엔진을 미리 띄워 라이브러리 로딩을 앱 시작과 동시에 끝내 둔다
+            let handle = app.handle().clone();
+            std::thread::spawn(move || engine::warm_up(&handle));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             app_info,
-            engine::engine_info,
+            engine::engine_status,
             engine::start_preview,
             engine::start_ortho,
             engine::cancel_engine,
             files::read_png_data_url,
             files::read_result_json,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                engine::shutdown(app);
+            }
+        });
 }

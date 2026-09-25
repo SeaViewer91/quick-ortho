@@ -5,6 +5,8 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   appInfo,
   cancelEngine,
+  engineStatus,
+  onEngineReady,
   readJson,
   readPng,
   runJob,
@@ -12,6 +14,7 @@ import {
   startPreview,
   STAGE_LABELS,
   type AppInfo,
+  type EngineReady,
   type EngineEvent,
   type OrthoResult,
   type PreviewResult,
@@ -31,6 +34,7 @@ const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
 function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [engine, setEngine] = useState<EngineReady | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -50,6 +54,14 @@ function App() {
 
   useEffect(() => {
     appInfo().then(setInfo).catch(() => undefined);
+    // 엔진은 앱 시작과 함께 백그라운드에서 준비된다
+    const un = onEngineReady(setEngine);
+    engineStatus()
+      .then((s) => s.ready && setEngine(s.ready))
+      .catch(() => undefined);
+    return () => {
+      un.then((f) => f());
+    };
   }, []);
 
   const onEvent = (e: EngineEvent) => {
@@ -310,6 +322,13 @@ function App() {
             {info.name} v{info.version} · {info.os}/{info.arch}
           </span>
         )}
+        <span className={`engine-state ${engine ? (engine.ok ? "ok" : "bad") : ""}`}>
+          {engine === null
+            ? "엔진 준비 중"
+            : engine.ok
+              ? `엔진 준비됨 (v${engine.version})`
+              : `엔진 오류: ${engine.error}`}
+        </span>
       </footer>
     </div>
   );

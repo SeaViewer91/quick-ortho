@@ -25,6 +25,26 @@
 - 데스크톱: [Tauri 2](https://tauri.app/) + React + TypeScript
 - 처리 엔진: Python([pycolmap](https://github.com/colmap/colmap)) 기반 사이드카
 
+## 설치 (개발 빌드)
+
+정식 릴리스 전까지는 GitHub Actions 빌드 결과물로 설치함.
+저장소 **Actions → build → 최근 성공한 실행 → Artifacts**에서 OS별 파일을 받음. 처리 엔진이 포함되어 있어 Python 설치가 필요 없음.
+
+| OS | 파일 | 요구 사항 |
+|---|---|---|
+| macOS (Apple Silicon) | `QuickOrtho-aarch64-apple-darwin` 안의 `.dmg` | macOS 14(Sonoma) 이상 |
+| Windows 10/11 (x64) | `QuickOrtho-x86_64-pc-windows-msvc` 안의 `.msi` 또는 `-setup.exe` | - |
+
+- 설치파일은 약 200~300 MB임 (SfM·영상 처리 라이브러리 포함)
+- 코드 서명을 하지 않은 빌드이므로 처음 실행 시 경고가 나옴
+  - macOS: 앱을 응용 프로그램 폴더로 옮긴 뒤 터미널에서 다음을 한 번 실행함
+
+    ```bash
+    xattr -dr com.apple.quarantine /Applications/QuickOrtho.app
+    ```
+
+  - Windows: SmartScreen 경고에서 **추가 정보 → 실행**을 누름
+
 ## 개발 환경 구성
 
 필요 도구: Node.js LTS, Rust(stable), Python 3.10~3.13
@@ -43,7 +63,8 @@ npm install
 npm run tauri dev
 ```
 
-- 엔진 실행 파일을 직접 지정하려면 환경변수 `QUICKORTHO_ENGINE`에 경로를 설정함
+- 앱은 시작할 때 엔진을 상주 모드(`serve`)로 한 번 띄워 두고 작업마다 재사용함
+- 엔진 경로 우선순위: 환경변수 `QUICKORTHO_ENGINE` → 설치본에 포함된 엔진 → `engine/.venv` → 시스템 파이썬
 - 결과는 영상 폴더 옆의 `<폴더명>_QuickOrtho/` 아래에 저장됨 (`preview/`, `ortho/`)
 
 ## 사용 방법 (개발 버전)

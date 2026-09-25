@@ -55,6 +55,12 @@ export type OrthoResult = {
 export type AppInfo = { name: string; version: string; os: string; arch: string };
 
 export const appInfo = () => invoke<AppInfo>("app_info");
+
+export type EngineReady = { ok: boolean; version?: string; warmup_s?: number; error?: string };
+export type EngineStatus = { running: boolean; busy: number | null; ready: EngineReady | null; command: string };
+export const engineStatus = () => invoke<EngineStatus>("engine_status");
+export const onEngineReady = (cb: (r: EngineReady) => void) =>
+  listen<EngineReady>("engine://ready", (e) => cb(e.payload));
 export const startPreview = (folder: string, quicklook: boolean) =>
   invoke<JobInfo>("start_preview", { folder, quicklook });
 export const startOrtho = (folder: string, gsdScale?: number) =>

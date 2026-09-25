@@ -253,6 +253,8 @@ button:disabled {
 }
 
 .app-footer {
+  display: flex;
+  justify-content: space-between;
   padding: 4px 16px;
   border-top: 1px solid var(--border);
   background: var(--surface);
@@ -264,4 +266,12 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.engine-state.ok {
+  color: var(--good);
+}
+
+.engine-state.bad {
+  color: var(--error);
 }
