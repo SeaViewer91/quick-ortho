@@ -113,6 +113,8 @@ class Project:
         (self.dir / "refined_frame.json").unlink(missing_ok=True)
         (self.dir / "refined_extra.json").unlink(missing_ok=True)
         shutil.rmtree(self.dir / "cache", ignore_errors=True)
+        (self.dir / "base_report.json").unlink(missing_ok=True)
+        (self.dir / "align_report.json").unlink(missing_ok=True)
         if self.edits_path.exists():
             edits = self.load_edits()
             edits["deleted_points"] = []
@@ -158,8 +160,16 @@ class Project:
         (self.dir / "base_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
 
     def base_report(self) -> dict:
-        p = self.dir / "base_report.json"
-        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        """최초 정사 모자이크 보고서. SDK가 만든 프로젝트는 align_report.json(정렬 단계 보고서)을 읽는다.
+
+        정렬 직후 정사 모자이크 단계에서 실패한 프로젝트에는 둘 다 없으므로 빈 dict를 돌려준다
+        (pipeline.align_report_from_project로 재구성에서 다시 만듦).
+        """
+        for name in ("base_report.json", "align_report.json"):
+            p = self.dir / name
+            if p.exists():
+                return json.loads(p.read_text(encoding="utf-8"))
+        return {}
 
     # ── 수정 사항 ──
     @property

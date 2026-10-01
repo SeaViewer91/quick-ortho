@@ -275,3 +275,13 @@ button:disabled {
 .engine-state.bad {
   color: var(--error);
 }
+
+.resume {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(31, 111, 235, 0.08);
+  border: 1px solid rgba(31, 111, 235, 0.35);
+}

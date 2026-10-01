@@ -317,7 +317,7 @@ pub fn start_ortho<R: Runtime>(
 /// 정밀 보정 작업 (정사 모자이크 결과 폴더 기준).
 ///
 /// 허용 명령과 인자
-/// - `project-info`, `tiepoints`: 추가 인자 없음
+/// - `project-info`, `tiepoints`, `render`(저장된 정렬 결과로 정사 모자이크만 다시 생성): 추가 인자 없음
 /// - `predict`: `["--spec", JSON]`
 /// - `edits-save`: `["--edits", JSON]`
 /// - `refine`: `[]` 또는 `["--reset"]`
@@ -340,7 +340,7 @@ pub fn start_project_task<R: Runtime>(
 fn validate_project_task(command: &str, ortho_dir: &str, args: &[String]) -> Result<(), String> {
     crate::files::ensure_result_dir(Path::new(ortho_dir))?;
     let ok = match command {
-        "project-info" | "tiepoints" => args.is_empty(),
+        "project-info" | "tiepoints" | "render" => args.is_empty(),
         "predict" => args.len() == 2 && args[0] == "--spec",
         "edits-save" => args.len() == 2 && args[0] == "--edits",
         "refine" => args.is_empty() || (args.len() == 1 && args[0] == "--reset"),
@@ -429,6 +429,8 @@ mod task_tests {
         assert!(validate_project_task("tiepoints", d, &[]).is_ok());
         assert!(validate_project_task("predict", d, &["--spec".into(), "{}".into()]).is_ok());
         assert!(validate_project_task("refine", d, &["--reset".into()]).is_ok());
+        assert!(validate_project_task("render", d, &[]).is_ok());
+        assert!(validate_project_task("render", d, &["--gsd".into()]).is_err());
         assert!(validate_project_task("refine", d, &["--x".into()]).is_err());
         assert!(validate_project_task("ortho", d, &[]).is_err());
         assert!(validate_project_task("tiepoints", "/a/imgs/ortho", &[]).is_err());

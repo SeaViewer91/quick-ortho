@@ -14,6 +14,7 @@ import {
   runJob,
   startOrtho,
   startPreview,
+  startProjectTask,
   STAGE_LABELS,
   type AppInfo,
   type EngineReady,
@@ -26,13 +27,21 @@ import RefineView from "./refine/RefineView";
 import "./App.css";
 
 type Progress = { stage: string; message: string; current: number; total: number };
-type Busy = "load" | "quicklook" | "ortho" | null;
+type Busy = "load" | "quicklook" | "ortho" | "render" | null;
 
-const BUSY_TITLE = { load: "데이터 불러오기", quicklook: "간이 모자이크 생성", ortho: "정사 모자이크 생성" };
+const BUSY_TITLE = {
+  load: "데이터 불러오기",
+  quicklook: "간이 모자이크 생성",
+  ortho: "정사 모자이크 생성",
+  render: "정사 모자이크 생성 (정렬 결과 재사용)",
+};
 
 const fmtArea = (m2: number) => (m2 >= 10000 ? `${(m2 / 10000).toFixed(2)} ha` : `${Math.round(m2)} m²`);
 const fmtRange = (a: number, b: number) =>
   Math.round(a) === Math.round(b) ? `${Math.round(a)}` : `${Math.round(a)}~${Math.round(b)}`;
+/** 보고서 값이 비어 있어도(이전·이후 버전이 만든 결과) 화면이 멈추지 않도록 숫자를 표시한다 */
+const fmtFixed = (v: number | null | undefined, digits: number, scale = 1) =>
+  typeof v === "number" && Number.isFinite(v) ? (v * scale).toFixed(digits) : "-";
 const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
 function App() {
@@ -54,6 +63,8 @@ function App() {
     ortho: true,
   });
   const [refineOpen, setRefineOpen] = useState(false);
+  /** 정렬(SfM)은 끝났지만 정사 모자이크 단계에서 중단된 결과가 있음 → 정렬을 건너뛰고 이어서 만들 수 있음 */
+  const [resumable, setResumable] = useState(false);
   const jobRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -85,6 +96,7 @@ function App() {
   async function loadData(dir: string) {
     setBusy("load");
     setRefineOpen(false);
+    setResumable(false);
     setError(null);
     setPreview(null);
     setOrtho(null);
@@ -120,7 +132,42 @@ function App() {
       setOverlays((o) => ({ ...o, ortho: { url, corners: rep.preview_corners_lonlat } }));
       setLayers((l) => ({ ...l, ortho: true, coverage: false }));
     } catch {
-      // 이전 결과가 없음
+      // 정사 모자이크 결과가 없음. 정렬 결과만 남아 있으면 이어서 만들 수 있게 한다
+      await checkResumable(dir);
+    }
+  }
+
+  async function checkResumable(dir: string) {
+    try {
+      await readJson(joinPath(joinPath(resultDir(dir, "ortho"), "project"), "meta.json"));
+      setResumable(true);
+    } catch {
+      setResumable(false);
+    }
+  }
+
+  /** 저장된 정렬 결과로 정사 모자이크만 만든다 (SfM 생략). */
+  async function runRender() {
+    if (!folder) return;
+    setBusy("render");
+    setError(null);
+    try {
+      const res = await runJob<OrthoResult>(
+        () => startProjectTask("render", resultDir(folder, "ortho")),
+        onEvent,
+        (j) => (jobRef.current = j.job_id),
+      );
+      const url = await readPng(res.outputs.preview);
+      setOrtho(res);
+      setResumable(false);
+      setOverlays((o) => ({ ...o, ortho: { url, corners: res.preview_corners_lonlat } }));
+      setLayers((l) => ({ ...l, ortho: true, quicklook: false, coverage: false }));
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(null);
+      setProgress(null);
+      jobRef.current = null;
     }
   }
 
@@ -176,6 +223,14 @@ function App() {
       setLayers((l) => ({ ...l, ortho: true, quicklook: false, coverage: false }));
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
+      // 정렬 뒤에 실패했으면 이전 결과는 지워졌고 정렬 결과만 남음 → 화면을 맞추고 이어서 만들기를 안내
+      try {
+        await readJson(joinPath(resultDir(folder, "ortho"), "report.json"));
+      } catch {
+        setOrtho(null);
+        setOverlays((o) => ({ ...o, ortho: undefined }));
+        await checkResumable(folder);
+      }
     } finally {
       setBusy(null);
       setProgress(null);
@@ -284,6 +339,17 @@ function App() {
                 </button>
               </div>
               <p className="muted small">간이 모자이크는 수 초, 정사 모자이크는 수 분이 걸림</p>
+              {resumable && !ortho && (
+                <div className="resume">
+                  <p>
+                    이전 정사 모자이크 작업이 정렬(카메라 위치·자세 추정)을 마친 뒤 중단됨. 정렬 결과를 그대로 써서 정사
+                    모자이크만 만들 수 있음 (정렬은 전체 처리 시간의 70~75%).
+                  </p>
+                  <button type="button" onClick={runRender} disabled={busy !== null}>
+                    정렬 결과로 정사 모자이크 만들기
+                  </button>
+                </div>
+              )}
             </section>
           )}
 
@@ -293,15 +359,15 @@ function App() {
               <dl className="stats">
                 <dt>정합</dt>
                 <dd>
-                  {ortho.sfm.num_registered}/{ortho.sfm.num_input_images}장
+                  {ortho.sfm?.num_registered ?? "-"}/{ortho.sfm?.num_input_images ?? "-"}장
                 </dd>
                 <dt>GSD</dt>
-                <dd>{(ortho.ortho.gsd_m * 100).toFixed(1)} cm</dd>
+                <dd>{fmtFixed(ortho.ortho?.gsd_m, 1, 100)} cm</dd>
                 <dt>재투영 오차</dt>
                 <dd>
                   {ortho.refine
                     ? `RMSE ${ortho.refine.after.rmse_px.toFixed(2)} px (보정)`
-                    : `${ortho.sfm.mean_reprojection_error_px.toFixed(2)} px`}
+                    : `${fmtFixed(ortho.sfm?.mean_reprojection_error_px, 2)} px`}
                 </dd>
                 <dt>좌표 기준</dt>
                 <dd>
@@ -310,7 +376,7 @@ function App() {
                     : ortho.refine?.mode === "gcp_shift"
                       ? "GCP (이동만)"
                       : "GPS"}{" "}
-                  · EPSG:{ortho.georef.epsg}
+                  · EPSG:{ortho.georef?.epsg ?? "-"}
                 </dd>
                 {ortho.refine?.gcp_summary?.check ? (
                   <>
@@ -320,18 +386,18 @@ function App() {
                       {ortho.refine.gcp_summary.check.rmse_z.toFixed(3)} m
                     </dd>
                   </>
-                ) : ortho.georef.gps_residual_rms_m !== undefined ? (
+                ) : ortho.georef?.gps_residual_rms_m != null ? (
                   <>
                     <dt>GPS 잔차</dt>
                     <dd>{ortho.georef.gps_residual_rms_m.toFixed(2)} m</dd>
                   </>
                 ) : null}
                 <dt>처리 시간</dt>
-                <dd>{Math.round(ortho.timings_s.total_s)}초</dd>
+                <dd>{ortho.timings_s?.total_s != null ? `${Math.round(ortho.timings_s.total_s)}초` : "-"}</dd>
                 <dt>최대 메모리</dt>
-                <dd>{(ortho.peak_memory_mb / 1024).toFixed(2)} GB</dd>
+                <dd>{fmtFixed(ortho.peak_memory_mb, 2, 1 / 1024)} GB</dd>
               </dl>
-              <Warnings items={ortho.warnings} />
+              <Warnings items={ortho.warnings ?? []} />
               <div className="actions">
                 <button type="button" onClick={() => setRefineOpen(true)} disabled={busy !== null}>
                   정밀 보정 (GCP·타이포인트)

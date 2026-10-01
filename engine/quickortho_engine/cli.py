@@ -9,7 +9,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import __version__
+from . import __version__, geoenv
 from .protocol import Emitter
 from .scan import scan_folder
 
@@ -63,6 +63,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ed.add_argument("ortho_dir", type=Path)
     p_ed.add_argument("--edits", required=True, help="JSON")
 
+    p_ren = sub.add_parser("render", help="저장된 정렬 결과로 DSM·정사 모자이크만 다시 생성 (SfM 생략)")
+    p_ren.add_argument("ortho_dir", type=Path, help="정사 모자이크 결과 폴더")
+
     p_ref = sub.add_parser("refine", help="수정 사항을 적용해 번들 조정 후 정사 모자이크 재생성")
     p_ref.add_argument("ortho_dir", type=Path)
     p_ref.add_argument("--reset", action="store_true", help="보정을 취소하고 최초 결과로 되돌림")
@@ -91,6 +94,8 @@ def _dispatch(args: argparse.Namespace, out: Emitter) -> None:
                 "python": platform.python_version(),
                 "os": platform.system(),
                 "arch": platform.machine(),
+                # 다른 GIS 프로그램(PostGIS 등)의 설정이라 무시한 환경변수 (진단용)
+                "geo_env_overridden": dict(geoenv.overridden),
             },
         )
     elif args.command == "scan":
@@ -131,6 +136,10 @@ def _dispatch(args: argparse.Namespace, out: Emitter) -> None:
         else:
             res = marking.save_edits(args.ortho_dir, json.loads(args.edits))
         out.result(args.command, res)
+    elif args.command == "render":
+        from .pipeline import run_render
+
+        out.result("render", run_render(args.ortho_dir, out))
     elif args.command == "refine":
         from .refine import run_refine
 

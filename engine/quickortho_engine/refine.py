@@ -316,6 +316,11 @@ def run_refine(ortho_dir: Path, out: Emitter, reset: bool = False) -> dict:
     gps = {k: tuple(v) for k, v in meta["gps"].items()}
     edits = proj.load_edits()
     base_report = proj.base_report()
+    if not base_report:
+        from .pipeline import align_report_from_project
+
+        base_report = align_report_from_project(proj)
+        proj.save_base_report(base_report)
     timings: dict[str, float] = {}
     warnings: list[str] = []
 

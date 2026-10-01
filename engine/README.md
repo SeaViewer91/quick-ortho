@@ -51,7 +51,12 @@ python -m quickortho_engine predict <결과 폴더> --spec '{"marks": [...], "wo
 python -m quickortho_engine gcp-parse <측량 성과 파일> [--ortho <결과 폴더>] [--encoding cp949] [--delimiter ,]
 python -m quickortho_engine edits-save <결과 폴더> --edits '<JSON>'
 python -m quickortho_engine refine <결과 폴더> [--reset]
+python -m quickortho_engine render <결과 폴더>      # 저장된 정렬 결과로 정사 모자이크만 다시 생성 (SfM 생략)
 ```
+
+엔진은 시작할 때 `PROJ_LIB`·`PROJ_DATA`·`GDAL_DATA`를 rasterio 패키지(설치본은 번들)에 들어 있는 데이터 폴더로 바꾸고
+`GDAL_DRIVER_PATH`를 지움 (`geoenv.py`). Windows에 PostGIS·QGIS가 있으면 이 환경변수가 다른 버전의 데이터를 가리켜
+정사 모자이크 단계가 실패하기 때문임. 바꾼 변수는 `version` 결과의 `geo_env_overridden`에 표시됨.
 
 - `scan`: 폴더 내 JPG의 EXIF·DJI XMP를 읽어 위치·고도·짐벌 자세·카메라 정보를 수집하고,
   카메라별로 묶은 뒤 매핑용(광각) 카메라를 자동 선별함
