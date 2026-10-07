@@ -338,7 +338,7 @@ function App() {
                   {ortho ? "정사 모자이크 다시 생성" : "정사 모자이크 생성"}
                 </button>
               </div>
-              <p className="muted small">간이 모자이크는 수 초, 정사 모자이크는 수 분이 걸림</p>
+              <p className="muted small">간이 모자이크는 수 초, 정사 모자이크는 수 분~수십 분이 걸림 (원본 해상도로 생성)</p>
               {resumable && !ortho && (
                 <div className="resume">
                   <p>

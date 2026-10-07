@@ -304,7 +304,7 @@ def gcp_table(rec: pycolmap.Reconstruction, gcps: list[dict], frame: Frame) -> t
 
 
 def run_refine(ortho_dir: Path, out: Emitter, reset: bool = False) -> dict:
-    from .pipeline import OrthoOptions, PeakMemory, render_products
+    from .pipeline import PeakMemory, render_options, render_products
 
     t_start = time.perf_counter()
     proj = Project(ortho_dir)
@@ -458,8 +458,7 @@ def run_refine(ortho_dir: Path, out: Emitter, reset: bool = False) -> dict:
                 out.log(f"{label} {s_['count']}점 RMSE 수평 {s_['rmse_xy']:.3f} m, 수직 {s_['rmse_z']:.3f} m")
 
         # 6) 정사 모자이크 재생성
-        render = meta.get("render", {})
-        opts = OrthoOptions(gsd_m=render.get("gsd_m"), gsd_scale=render.get("gsd_scale", 2.0))
+        opts = render_options(meta)
         products = render_products(to_absolute(rec, frame), image_dir, proj.ortho_dir, frame.epsg, opts, out, timings)
 
     timings["total_s"] = time.perf_counter() - t_start

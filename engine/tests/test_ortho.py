@@ -40,9 +40,14 @@ def test_build_dsm_fills_outside_hull_smoothly():
     z = np.where(xy[:, 0] > 50, 20.0, 0.0)
     dsm = build_dsm(np.column_stack([xy, z]), (0, 0, 100, 100), res=2.0)
     assert not np.isnan(dsm.z).any()
-    # 볼록껍질 밖에서 최근접 채움으로 인한 급격한 단차가 없어야 함
+    # 볼록껍질 밖(점이 없는 곳)에서 최근접 채움으로 인한 급격한 단차가 없어야 함
+    # (점이 있는 곳의 실제 20 m 단차는 평활화를 줄인 뒤로 그대로 남는 것이 맞음)
     gy, gx = np.gradient(dsm.z, dsm.res)
-    assert np.hypot(gx, gy).max() < 4.0
+    xs = np.arange(dsm.z.shape[1]) * dsm.res
+    ys = 100 - np.arange(dsm.z.shape[0]) * dsm.res
+    X, Y = np.meshgrid(xs, ys)
+    outside = (X < 26) | (X > 74) | (Y < 26) | (Y > 74)
+    assert np.hypot(gx, gy)[outside].max() < 4.0
     assert 0.0 <= dsm.z.min() and dsm.z.max() <= 20.0
 
 
@@ -105,3 +110,40 @@ def test_make_view_limits_oblique_range():
     assert v is not None and np.allclose(v.center, C)
     xmin, ymin, xmax, ymax = v.bbox
     assert max(abs(xmin), abs(xmax), abs(ymin), abs(ymax)) <= 400 + 1e-6
+
+
+def _solid_view(img_dir: Path, name: str, color, cx: float) -> View:
+    """(cx, 0, 100)에서 연직으로 내려다보는 단색 영상 (200×100 px, GSD 1 m)."""
+    w, h = 200, 100
+    Image.fromarray(np.full((h, w, 3), color, np.uint8)).save(img_dir / name)
+    cam = pycolmap.Camera.create_from_model_name(1, "PINHOLE", 100.0, w, h)
+    R = np.diag([1.0, -1.0, -1.0])
+    C = np.array([cx, 0.0, 100.0])
+    fp = _footprint(cam, R, C, 0.0)
+    return View(name, cam, R, -R @ C, C, (fp[:, 0].min(), fp[:, 1].min(), fp[:, 0].max(), fp[:, 1].max()))
+
+
+def test_seamline_picks_one_image_per_pixel(tmp_path: Path):
+    """두 영상이 겹치는 곳을 평균하지 않고, 영상 중심에 가까운 쪽 하나로 칠한다 (경계선 근처만 섞음).
+
+    평균하면 영상끼리 조금만 어긋나도 상이 겹쳐 보이므로(이중상), 섞이는 화소는 경계선의 좁은 띠뿐이어야 한다.
+    """
+    img_dir = tmp_path / "imgs"
+    img_dir.mkdir()
+    a = _solid_view(img_dir, "a.png", (255, 0, 0), -40.0)  # x -140~60
+    b = _solid_view(img_dir, "b.png", (0, 0, 255), 40.0)  # x -60~140
+    dsm = Dsm(z=np.zeros((3, 3), np.float32), x0=-200, y0=100, res=200, num_points=0)
+    out = tmp_path / "o.tif"
+    render_orthomosaic(
+        [a, b], dsm, img_dir, out, CRS.from_epsg(32652), gsd=1.0, src_gsd=1.0,
+        bounds=(-140, -50, 140, 50), out=Emitter(io.StringIO()), tile=64,
+    )
+    with rasterio.open(out) as ds:
+        img = ds.read()
+    red, blue = img[0].astype(int), img[2].astype(int)
+    overlap = slice(140 - 60, 140 + 60)  # x -60~60 (두 영상이 겹치는 120 m)
+    mixed = (red[:, overlap] > 10) & (blue[:, overlap] > 10)
+    assert mixed.mean() < 0.15  # 경계선(x=0) 양쪽 몇 화소만 섞임
+    # 경계선은 두 영상 중심의 가운데(x=0): 서쪽은 빨강, 동쪽은 파랑
+    assert red[50, 140 - 30] == 255 and blue[50, 140 - 30] == 0
+    assert blue[50, 140 + 30] == 255 and red[50, 140 + 30] == 0

@@ -36,7 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ortho.add_argument("folder", type=Path, help="영상 폴더")
     p_ortho.add_argument("-o", "--output", type=Path, required=True, help="결과 폴더")
     p_ortho.add_argument("--gsd", type=float, default=None, help="출력 GSD(m). 기본값은 원본 GSD × --gsd-scale")
-    p_ortho.add_argument("--gsd-scale", type=float, default=2.0, help="원본 GSD 대비 출력 배율 (기본 2)")
+    p_ortho.add_argument("--gsd-scale", type=float, default=1.0, help="원본 GSD 대비 출력 배율 (기본 1: 원본 해상도)")
     p_ortho.add_argument("--max-image-size", type=int, default=2000, help="특징점 추출용 영상 긴 변(px)")
     p_ortho.add_argument("--max-features", type=int, default=4096, help="영상당 최대 특징점 수")
     p_ortho.add_argument("--threads", type=int, default=-1, help="스레드 수 (-1: 전체)")

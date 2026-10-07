@@ -31,9 +31,9 @@ from .surface import build_dsm, georeference, remove_z_outliers, sparse_points
 @dataclass
 class OrthoOptions:
     gsd_m: float | None = None  # 지정하지 않으면 원본 GSD × gsd_scale
-    gsd_scale: float = 2.0
+    gsd_scale: float = 1.0  # 원본 해상도 그대로 (v0.3.0부터. 이전에는 2.0)
     keep_work: bool = False
-    cache_budget_mb: int = 600
+    cache_budget_mb: int | None = None  # 원본 영상 캐시 (None: 사용 가능한 메모리의 약 30%)
     sfm: SfmOptions = field(default_factory=SfmOptions)
 
 
@@ -160,6 +160,17 @@ def _align(folder, images, gps, work, opts, out, timings, warnings):
     return rec, sfm_stats, geo
 
 
+def render_options(meta: dict) -> OrthoOptions:
+    """저장된 정사 모자이크 옵션. v0.3.0 이전 프로젝트는 당시 기본값(GSD 2배)이 저장돼 있으므로 원본 해상도(1배)로 바꾼다."""
+    render = meta.get("render") or {}
+    try:
+        ver = tuple(int(x) for x in str(meta.get("engine_version", "0")).split(".")[:3])
+    except ValueError:
+        ver = (0,)
+    scale = render.get("gsd_scale", 1.0) if ver >= (0, 3, 0) else 1.0
+    return OrthoOptions(gsd_m=render.get("gsd_m"), gsd_scale=scale)
+
+
 def align_report_from_project(proj: Project) -> dict:
     """정렬 보고서가 없는 프로젝트(정렬 뒤 정사 모자이크 단계에서 실패한 경우)의 보고서를 재구성에서 다시 만든다.
 
@@ -217,7 +228,7 @@ def run_render(ortho_dir: Path, out: Emitter) -> dict:
         proj.save_base_report(base)
     rec, frame, source = proj.load_current()
     render = meta.get("render", {})
-    opts = OrthoOptions(gsd_m=render.get("gsd_m"), gsd_scale=render.get("gsd_scale", 2.0))
+    opts = render_options(meta)
     timings: dict[str, float] = {}
     old_path = proj.ortho_dir / "report.json"
     old = json.loads(old_path.read_text(encoding="utf-8")) if old_path.exists() else {}
@@ -266,7 +277,8 @@ def render_products(
     vb = np.array([v.bbox for v in views])
     bounds = _snap_bounds((vb[:, 0].min(), vb[:, 1].min(), vb[:, 2].max(), vb[:, 3].max()), gsd)
     area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
-    dsm_res = max(0.5, 1.5 * math.sqrt(area / len(pts)))
+    # 점 간격의 절반 격자 (예전 1.5배 격자 + 강한 평활화는 갈대·관목·작은 기복의 높이를 지워 영상 간 어긋남을 키웠음)
+    dsm_res = max(0.5, 0.5 * math.sqrt(area / len(pts)))
     dsm = build_dsm(pts, bounds, dsm_res)
     _write_dsm(dsm, out_dir / "dsm.tif", crs)
     timings["dsm_s"] = time.perf_counter() - t0
