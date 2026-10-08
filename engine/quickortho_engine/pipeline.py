@@ -19,6 +19,7 @@ from rasterio.crs import CRS
 from rasterio.transform import from_origin
 
 from . import __version__
+from .color import estimate_gains
 from .ortho import build_views, finalize_cog, native_gsd, render_orthomosaic
 from .geo import Projector
 from .project import Project, to_absolute
@@ -34,6 +35,7 @@ class OrthoOptions:
     gsd_scale: float = 1.0  # 원본 해상도 그대로 (v0.3.0부터. 이전에는 2.0)
     keep_work: bool = False
     cache_budget_mb: int | None = None  # 원본 영상 캐시 (None: 사용 가능한 메모리의 약 30%)
+    color_balance: bool = True  # 영상 간 밝기·색 차이 보정 (심라인 이음매 단차 제거)
     sfm: SfmOptions = field(default_factory=SfmOptions)
 
 
@@ -283,13 +285,22 @@ def render_products(
     _write_dsm(dsm, out_dir / "dsm.tif", crs)
     timings["dsm_s"] = time.perf_counter() - t0
 
+    gains, color_stats = None, None
+    if opts.color_balance and len(views) > 1:
+        t0 = time.perf_counter()
+        out.stage("color", "영상 간 밝기·색 차이 보정")
+        gains, color_stats = estimate_gains(views, dsm, image_dir, bounds, src_gsd, out)
+        timings["color_s"] = time.perf_counter() - t0
+
     t0 = time.perf_counter()
     out.stage("ortho", f"정사 모자이크 생성 (GSD {gsd * 100:.1f} cm)")
     tmp = out_dir / "orthomosaic.tmp.tif"
     ortho_stats = render_orthomosaic(
         views, dsm, image_dir, tmp, crs, gsd, src_gsd, bounds, out,
-        cache_budget_mb=opts.cache_budget_mb,
+        cache_budget_mb=opts.cache_budget_mb, gains=gains,
     )
+    if color_stats:
+        ortho_stats["color"] = color_stats
     timings["ortho_s"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()

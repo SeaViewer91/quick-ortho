@@ -310,6 +310,7 @@ export const STAGE_LABELS: Record<string, string> = {
   mapping: "카메라 위치·자세 추정",
   georef: "좌표 정렬",
   dsm: "간이 DSM",
+  color: "밝기·색 보정",
   ortho: "정사투영",
   finalize: "마무리",
   refine: "정밀 보정",

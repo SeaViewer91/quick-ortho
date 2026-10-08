@@ -147,3 +147,38 @@ def test_seamline_picks_one_image_per_pixel(tmp_path: Path):
     # 경계선은 두 영상 중심의 가운데(x=0): 서쪽은 빨강, 동쪽은 파랑
     assert red[50, 140 - 30] == 255 and blue[50, 140 - 30] == 0
     assert blue[50, 140 + 30] == 255 and red[50, 140 + 30] == 0
+
+
+def test_color_balance_removes_brightness_step(tmp_path: Path):
+    """노출이 다른 두 영상(밝기 100, 140)을 이으면 심라인에서 밝기 단차가 생긴다. 이득 맵으로 단차를 없앤다."""
+    from quickortho_engine.color import estimate_gains
+
+    img_dir = tmp_path / "imgs"
+    img_dir.mkdir()
+    a = _solid_view(img_dir, "a.png", (100, 100, 100), -40.0)
+    b = _solid_view(img_dir, "b.png", (140, 140, 140), 40.0)
+    dsm = Dsm(z=np.zeros((3, 3), np.float32), x0=-200, y0=100, res=200, num_points=0)
+    bounds = (-140, -50, 140, 50)
+
+    def render(gains, name):
+        out = tmp_path / name
+        render_orthomosaic(
+            [a, b], dsm, img_dir, out, CRS.from_epsg(32652), gsd=1.0, src_gsd=1.0,
+            bounds=bounds, out=Emitter(io.StringIO()), tile=64, gains=gains,
+        )
+        with rasterio.open(out) as ds:
+            return ds.read(1).astype(float)
+
+    gains, stats = estimate_gains(
+        [a, b], dsm, img_dir, bounds, 1.0, Emitter(io.StringIO()), min_cell_px=2.0, wide_frac=0.3,
+    )
+    assert set(gains) == {"a.png", "b.png"} and stats["images"] == 2
+    plain = render(None, "plain.tif")
+    balanced = render(gains, "balanced.tif")
+    seam = 140  # x = 0
+    # 이음매 양쪽 바로 옆(±3화소)의 차이. 보정 후에는 넓은 범위에 걸친 완만한 변화만 남는다
+    step = lambda img: abs(img[20:80, seam + 2:seam + 4].mean() - img[20:80, seam - 4:seam - 2].mean())
+    assert step(plain) > 20  # 심라인 페더링 폭(수 화소) 안에서 밝기 40 차이가 그대로 드러남
+    assert step(balanced) < 5
+    # 겹치지 않는 바깥쪽은 원래 밝기에 가깝게 유지 (전체 톤을 바꾸지 않음)
+    assert abs(balanced[50, 5] - 100) < 12 and abs(balanced[50, 275] - 140) < 12
