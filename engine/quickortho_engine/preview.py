@@ -323,6 +323,15 @@ def render_quicklook(
     return rgba
 
 
+def _ms_summary(info: dict | None) -> dict | None:
+    """폴더 불러오기 결과에 다중분광 요약과 만들 수 있는 지수 목록(앱 설정 화면용)을 붙인다."""
+    if not info:
+        return None
+    from .indices import index_catalog
+
+    return {**info, "indices": index_catalog([b["name"] for b in info["bands"]])}
+
+
 def _ms_quicklook(image_dir: Path, name: str, scale: list[float]) -> np.ndarray:
     """다중분광 기준 밴드(12·16비트 TIFF)를 1/8로 줄여 노출을 맞춘 회색 영상으로 만든다.
 
@@ -485,6 +494,7 @@ def run_preview(
             "geojson": str(geojson_path),
         },
         "warnings": warnings + (["롤링 셔터 카메라 포함"] if scan["summary"]["rolling_shutter_warning"] else []),
+        "multispectral": _ms_summary(scan.get("multispectral")),
         "time_s": round(time.perf_counter() - t0, 2),
     }
     (out_dir / "preview.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

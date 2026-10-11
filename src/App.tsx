@@ -19,6 +19,7 @@ import {
   type AppInfo,
   type EngineReady,
   type EngineEvent,
+  type IndexOption,
   type MultispectralInfo,
   type OrthoResult,
   type PreviewResult,
@@ -28,13 +29,24 @@ import RefineView from "./refine/RefineView";
 import "./App.css";
 
 type Progress = { stage: string; message: string; current: number; total: number };
-type Busy = "load" | "quicklook" | "ortho" | "render" | null;
+type Busy = "load" | "quicklook" | "ortho" | "render" | "indices" | null;
 
 const BUSY_TITLE = {
   load: "데이터 불러오기",
   quicklook: "간이 모자이크 생성",
   ortho: "정사 모자이크 생성",
   render: "정사 모자이크 생성 (정렬 결과 재사용)",
+  indices: "식생지수 생성",
+};
+
+const INDEX_KEY = "quickortho.indices";
+const loadIndexSel = (): string[] | null => {
+  try {
+    const v = JSON.parse(localStorage.getItem(INDEX_KEY) ?? "null");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : null;
+  } catch {
+    return null;
+  }
 };
 
 const fmtArea = (m2: number) => (m2 >= 10000 ? `${(m2 / 10000).toFixed(2)} ha` : `${Math.round(m2)} m²`);
@@ -54,9 +66,12 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [ortho, setOrtho] = useState<OrthoResult | null>(null);
-  const [overlays, setOverlays] = useState<{ quicklook?: Overlay; coverage?: Overlay; ortho?: Overlay; index?: Overlay }>(
-    {},
-  );
+  const [overlays, setOverlays] = useState<{ quicklook?: Overlay; coverage?: Overlay; ortho?: Overlay }>({});
+  /** 다중분광 지수별 지도 미리보기와 지금 보이는 지수 */
+  const [indexOverlays, setIndexOverlays] = useState<Record<string, Overlay>>({});
+  const [activeIndex, setActiveIndex] = useState<string | null>(null);
+  /** 만들 지수 (마지막 선택을 기억, 없으면 기본값) */
+  const [indexSel, setIndexSel] = useState<string[] | null>(loadIndexSel);
   const [geojson, setGeojson] = useState<FeatureCollection>();
   const [layers, setLayers] = useState<Layers>({
     quicklook: true,
@@ -105,6 +120,7 @@ function App() {
     setPreview(null);
     setOrtho(null);
     setOverlays({});
+    setIndexOverlays({});
     setGeojson(undefined);
     setLayers((l) => ({ ...l, footprints: true, quicklook: true, coverage: false }));
     try {
@@ -127,12 +143,67 @@ function App() {
     }
   }
 
-  /** 정사 모자이크 결과의 지도 오버레이 (다중분광이면 식생지수 미리보기도). */
-  async function orthoOverlays(rep: OrthoResult): Promise<{ ortho: Overlay; index?: Overlay }> {
+  const indexCatalog: IndexOption[] | undefined = preview?.multispectral?.indices;
+
+  /** 정사 모자이크 결과의 지도 오버레이. 다중분광이면 지수 미리보기도 읽어 지수 레이어를 채운다. */
+  async function orthoOverlays(rep: OrthoResult): Promise<{ ortho: Overlay }> {
     const corners = rep.preview_corners_lonlat;
     const url = await readPng(rep.outputs.preview);
-    const idx = rep.outputs.index_preview ? await readPng(rep.outputs.index_preview).catch(() => undefined) : undefined;
-    return { ortho: { url, corners }, index: idx ? { url: idx, corners } : undefined };
+    await loadIndexOverlays(rep);
+    return { ortho: { url, corners } };
+  }
+
+  async function loadIndexOverlays(rep: OrthoResult) {
+    const corners = rep.preview_corners_lonlat;
+    const pngs: Record<string, string> = { ...(rep.outputs.index_previews ?? {}) };
+    if (!rep.outputs.index_previews && rep.outputs.index_preview) pngs.NDVI = rep.outputs.index_preview; // v0.4.0 결과
+    const entries = await Promise.all(
+      Object.entries(pngs).map(async ([k, p]) => [k, await readPng(p).catch(() => null)] as const),
+    );
+    const ov: Record<string, Overlay> = {};
+    for (const [k, u] of entries) if (u) ov[k] = { url: u, corners };
+    setIndexOverlays(ov);
+    setActiveIndex((cur) => (cur && ov[cur] ? cur : (Object.keys(ov)[0] ?? null)));
+  }
+
+  /** 지수 선택: 폴더의 카메라로 만들 수 있는 것 중 마지막 선택(없으면 기본값). */
+  function chosenIndices(options: IndexOption[] | undefined): string[] {
+    const avail = new Set((options ?? []).filter((o) => o.available).map((o) => o.name));
+    const base = indexSel ?? (options ?? []).filter((o) => o.default).map((o) => o.name);
+    return base.filter((n) => avail.size === 0 || avail.has(n));
+  }
+
+  function changeIndexSel(next: string[]) {
+    setIndexSel(next);
+    try {
+      localStorage.setItem(INDEX_KEY, JSON.stringify(next));
+    } catch {
+      // 저장 못 해도 이번 실행에는 반영됨
+    }
+  }
+
+  /** 다중분광 결과에서 고른 지수만 다시 만든다 (정렬·정사 생략, 수십 초). */
+  async function remakeIndices() {
+    if (!folder || !ortho?.multispectral) return;
+    setBusy("indices");
+    setError(null);
+    try {
+      const sel = chosenIndices(indexCatalog);
+      const res = await runJob<OrthoResult>(
+        () => startProjectTask("indices", resultDir(folder, "ortho"), ["--indices", sel.length ? sel.join(",") : "none"]),
+        onEvent,
+        (j) => (jobRef.current = j.job_id),
+      );
+      setOrtho(res);
+      await loadIndexOverlays(res);
+      setLayers((l) => ({ ...l, index: Object.keys(res.outputs.index_previews ?? {}).length > 0 }));
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(null);
+      setProgress(null);
+      jobRef.current = null;
+    }
   }
 
   /** 이전에 만든 정사 모자이크가 있으면 불러온다 (보정 작업을 이어서 하기 위해). */
@@ -228,7 +299,12 @@ function App() {
     setBusy("ortho");
     setError(null);
     try {
-      const res = await runJob<OrthoResult>(() => startOrtho(folder), onEvent, (j) => (jobRef.current = j.job_id));
+      const ms = preview?.multispectral;
+      const res = await runJob<OrthoResult>(
+        () => startOrtho(folder, undefined, ms ? chosenIndices(ms.indices) : undefined),
+        onEvent,
+        (j) => (jobRef.current = j.job_id),
+      );
       const ov = await orthoOverlays(res);
       setOrtho(res);
       setOverlays((o) => ({ ...o, ...ov }));
@@ -240,7 +316,8 @@ function App() {
         await readJson(joinPath(resultDir(folder, "ortho"), "report.json"));
       } catch {
         setOrtho(null);
-        setOverlays((o) => ({ ...o, ortho: undefined, index: undefined }));
+        setOverlays((o) => ({ ...o, ortho: undefined }));
+        setIndexOverlays({});
         await checkResumable(folder);
       }
     } finally {
@@ -342,6 +419,14 @@ function App() {
                 <dd>{preview.time_s.toFixed(1)}초</dd>
               </dl>
               <Warnings items={preview.warnings} />
+              {preview.multispectral && (
+                <IndexPicker
+                  options={preview.multispectral.indices}
+                  selected={chosenIndices(preview.multispectral.indices)}
+                  onChange={changeIndexSel}
+                  disabled={busy !== null}
+                />
+              )}
               <div className="actions">
                 <button type="button" className="secondary" onClick={makeQuicklook} disabled={busy !== null}>
                   {overlays.quicklook ? "간이 모자이크 다시 생성" : "간이 모자이크 생성"}
@@ -411,6 +496,21 @@ function App() {
                 <dd>{fmtFixed(ortho.peak_memory_mb, 2, 1 / 1024)} GB</dd>
               </dl>
               <Warnings items={ortho.warnings ?? []} />
+              {ortho.multispectral && indexCatalog && (
+                <details className="remake">
+                  <summary>식생지수 다시 만들기</summary>
+                  <IndexPicker
+                    options={indexCatalog}
+                    selected={chosenIndices(indexCatalog)}
+                    onChange={changeIndexSel}
+                    disabled={busy !== null}
+                    hint="정렬·정사 모자이크는 그대로 두고 고른 지수만 다시 만듦 (수십 초)"
+                  />
+                  <button type="button" className="secondary" onClick={remakeIndices} disabled={busy !== null}>
+                    지수 다시 만들기
+                  </button>
+                </details>
+              )}
               <div className="actions">
                 <button type="button" onClick={() => setRefineOpen(true)} disabled={busy !== null}>
                   정밀 보정 (GCP·타이포인트)
@@ -435,20 +535,22 @@ function App() {
                   <input type="checkbox" checked={layers.ortho} onChange={() => toggle("ortho")} /> 정사 모자이크
                 </label>
               )}
-              {overlays.index && (
-                <label>
-                  <input type="checkbox" checked={layers.index} onChange={() => toggle("index")} /> 식생지수 (NDVI)
-                </label>
-              )}
-              {overlays.index && layers.index && (
-                <div className="legend">
-                  <span style={{ background: "#8c510a" }} />
-                  -0.2
-                  <span style={{ background: "#f6e8c3" }} />
-                  0.4
-                  <span style={{ background: "#1a9850" }} />
-                  0.9
+              {activeIndex && indexOverlays[activeIndex] && (
+                <div className="index-layer">
+                  <label>
+                    <input type="checkbox" checked={layers.index} onChange={() => toggle("index")} /> 지수
+                  </label>
+                  <select value={activeIndex} onChange={(e) => setActiveIndex(e.target.value)}>
+                    {Object.keys(indexOverlays).map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+              )}
+              {activeIndex && layers.index && ortho?.multispectral?.index_legend?.[activeIndex] && (
+                <IndexLegend name={activeIndex} lg={ortho.multispectral.index_legend[activeIndex]} />
               )}
               <label>
                 <input type="checkbox" checked={layers.coverage} onChange={() => toggle("coverage")} /> 중복도
@@ -472,7 +574,12 @@ function App() {
         </aside>
 
         <section className="map-wrap">
-          <MapView {...overlays} geojson={geojson} layers={layers} />
+          <MapView
+            {...overlays}
+            index={activeIndex ? indexOverlays[activeIndex] : undefined}
+            geojson={geojson}
+            layers={layers}
+          />
           {!preview && !busy && <div className="map-hint">영상 폴더를 선택하면 촬영 위치와 범위가 표시됨</div>}
         </section>
       </main>
@@ -545,5 +652,48 @@ function MultispectralStats({ ms }: { ms: MultispectralInfo }) {
         </>
       )}
     </>
+  );
+}
+
+function IndexPicker({
+  options,
+  selected,
+  onChange,
+  disabled,
+  hint = "고른 지수만 만듦. 정사 모자이크를 만든 뒤에도 바꿀 수 있음",
+}: {
+  options: IndexOption[];
+  selected: string[];
+  onChange: (v: string[]) => void;
+  disabled: boolean;
+  hint?: string;
+}) {
+  const set = new Set(selected);
+  const toggle = (n: string) => onChange(options.filter((o) => (o.name === n ? !set.has(n) : set.has(o.name))).map((o) => o.name));
+  return (
+    <fieldset className="index-picker" disabled={disabled}>
+      <legend>식생·수분 지수 (다중분광)</legend>
+      {options.map((o) => (
+        <label key={o.name} title={o.available ? `${o.label} · ${o.bands.join(", ")}` : `${o.label} · 필요한 밴드 없음 (${o.bands.join(", ")})`}>
+          <input type="checkbox" checked={set.has(o.name) && o.available} disabled={!o.available} onChange={() => toggle(o.name)} />
+          {o.name}
+        </label>
+      ))}
+      <p className="muted small">{hint}</p>
+    </fieldset>
+  );
+}
+
+function IndexLegend({ name, lg }: { name: string; lg: { label: string; min: number; max: number; colors: string[] } }) {
+  return (
+    <div className="legend index-legend" title={lg.label}>
+      <span className="legend-name">{name}</span>
+      <span style={{ background: lg.colors[0] }} />
+      {lg.min}
+      <span style={{ background: lg.colors[1] }} />
+      {Number(((lg.min + lg.max) / 2).toFixed(2))}
+      <span style={{ background: lg.colors[2] }} />
+      {lg.max}
+    </div>
   );
 }

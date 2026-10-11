@@ -297,6 +297,7 @@ pub fn start_ortho<R: Runtime>(
     state: State<EngineState>,
     folder: String,
     gsd_scale: Option<f64>,
+    indices: Option<Vec<String>>,
 ) -> Result<JobInfo, String> {
     let folder = PathBuf::from(folder);
     let out = default_output_dir(&folder, "ortho")?;
@@ -310,6 +311,11 @@ pub fn start_ortho<R: Runtime>(
         argv.push("--gsd-scale".into());
         argv.push(format!("{s}"));
     }
+    if let Some(list) = indices {
+        // 다중분광 지수 (RGB 영상이면 엔진이 무시함). 빈 목록은 "만들지 않음"
+        argv.push("--indices".into());
+        argv.push(index_list_arg(&list)?);
+    }
     let job_id = submit(&app, &state, argv)?;
     Ok(JobInfo { job_id, output_dir: out.to_string_lossy().into() })
 }
@@ -321,6 +327,7 @@ pub fn start_ortho<R: Runtime>(
 /// - `predict`: `["--spec", JSON]`
 /// - `edits-save`: `["--edits", JSON]`
 /// - `refine`: `[]` 또는 `["--reset"]`
+/// - `indices`(다중분광 지수만 다시 생성): `["--indices", "NDVI,NDRE" | "none"]`
 #[tauri::command]
 pub fn start_project_task<R: Runtime>(
     app: AppHandle<R>,
@@ -337,6 +344,23 @@ pub fn start_project_task<R: Runtime>(
     Ok(JobInfo { job_id, output_dir: ortho_dir })
 }
 
+/// 지수 이름 목록 → 엔진 인자. 이름은 영문·숫자만 (엔진이 실제 이름을 다시 검사함)
+fn index_list_arg(list: &[String]) -> Result<String, String> {
+    let joined = if list.is_empty() { "none".to_string() } else { list.join(",") };
+    if is_index_list(&joined) {
+        Ok(joined)
+    } else {
+        Err("지수 이름이 올바르지 않음".into())
+    }
+}
+
+fn is_index_list(s: &str) -> bool {
+    s == "none"
+        || (!s.is_empty()
+            && s.len() <= 200
+            && s.split(',').all(|n| !n.is_empty() && n.len() <= 16 && n.chars().all(|c| c.is_ascii_alphanumeric())))
+}
+
 fn validate_project_task(command: &str, ortho_dir: &str, args: &[String]) -> Result<(), String> {
     crate::files::ensure_result_dir(Path::new(ortho_dir))?;
     let ok = match command {
@@ -344,6 +368,7 @@ fn validate_project_task(command: &str, ortho_dir: &str, args: &[String]) -> Res
         "predict" => args.len() == 2 && args[0] == "--spec",
         "edits-save" => args.len() == 2 && args[0] == "--edits",
         "refine" => args.is_empty() || (args.len() == 1 && args[0] == "--reset"),
+        "indices" => args.len() == 2 && args[0] == "--indices" && is_index_list(&args[1]),
         _ => return Err(format!("지원하지 않는 보정 명령: {command}")),
     };
     if ok {
@@ -421,7 +446,7 @@ pub fn engine_status<R: Runtime>(app: AppHandle<R>, state: State<EngineState>) -
 
 #[cfg(test)]
 mod task_tests {
-    use super::validate_project_task;
+    use super::{index_list_arg, validate_project_task};
 
     #[test]
     fn project_task_whitelist() {
@@ -430,6 +455,12 @@ mod task_tests {
         assert!(validate_project_task("predict", d, &["--spec".into(), "{}".into()]).is_ok());
         assert!(validate_project_task("refine", d, &["--reset".into()]).is_ok());
         assert!(validate_project_task("render", d, &[]).is_ok());
+        assert!(validate_project_task("indices", d, &["--indices".into(), "NDVI,NDRE".into()]).is_ok());
+        assert!(validate_project_task("indices", d, &["--indices".into(), "none".into()]).is_ok());
+        assert!(validate_project_task("indices", d, &["--indices".into(), "NDVI;rm".into()]).is_err());
+        assert!(validate_project_task("indices", d, &[]).is_err());
+        assert_eq!(index_list_arg(&[]).unwrap(), "none");
+        assert!(index_list_arg(&["ND VI".into()]).is_err());
         assert!(validate_project_task("render", d, &["--gsd".into()]).is_err());
         assert!(validate_project_task("refine", d, &["--x".into()]).is_err());
         assert!(validate_project_task("ortho", d, &[]).is_err());

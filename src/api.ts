@@ -14,8 +14,17 @@ export type EngineEvent =
 
 export type JobInfo = { job_id: number; output_dir: string };
 
+export type IndexOption = { name: string; label: string; bands: string[]; available: boolean; default: boolean };
+
 export type PreviewResult = {
   folder: string;
+  multispectral?: {
+    model: string;
+    bands: { name: string; wavelength_nm: number | null }[];
+    reference_band: string;
+    panel_captures: number;
+    indices: IndexOption[];
+  } | null;
   num_images: number;
   epsg: number;
   corners_lonlat: Corners;
@@ -45,7 +54,16 @@ export type OrthoResult = {
   };
   georef: { epsg: number; gps_residual_rms_m?: number; mode?: "gps" | "gcp" | "gcp_shift"; note?: string };
   ortho: { width: number; height: number; gsd_m: number };
-  outputs: { orthomosaic: string; dsm: string; preview: string; indices?: string; index_preview?: string };
+  outputs: {
+    orthomosaic: string;
+    dsm: string;
+    preview: string;
+    /** 지수별 GeoTIFF (v0.4.0 결과는 다중밴드 파일 경로 문자열) */
+    indices?: Record<string, string> | string;
+    index_previews?: Record<string, string>;
+    /** v0.4.0 결과의 NDVI 미리보기 */
+    index_preview?: string;
+  };
   multispectral?: MultispectralInfo;
   preview_corners_lonlat: Corners;
   timings_s: { total_s: number };
@@ -60,6 +78,8 @@ export type MultispectralInfo = {
   reference_band: string;
   values: "reflectance" | "radiance";
   indices: string[];
+  index_legend?: Record<string, { label: string; min: number; max: number; colors: string[] }>;
+  indices_skipped?: string[];
   radiometry: {
     mode: "dls+panel" | "dls" | "panel" | "radiance";
     capture_normalization?: {
@@ -81,8 +101,8 @@ export const onEngineReady = (cb: (r: EngineReady) => void) =>
   listen<EngineReady>("engine://ready", (e) => cb(e.payload));
 export const startPreview = (folder: string, quicklook: boolean) =>
   invoke<JobInfo>("start_preview", { folder, quicklook });
-export const startOrtho = (folder: string, gsdScale?: number) =>
-  invoke<JobInfo>("start_ortho", { folder, gsdScale });
+export const startOrtho = (folder: string, gsdScale?: number, indices?: string[]) =>
+  invoke<JobInfo>("start_ortho", { folder, gsdScale, indices });
 export const cancelEngine = (jobId: number) => invoke<void>("cancel_engine", { jobId });
 export const readPng = (path: string) => invoke<string>("read_png_data_url", { path });
 export const readJson = <T>(path: string) => invoke<T>("read_result_json", { path });

@@ -174,6 +174,22 @@ MicaSense RedEdge-MX, RedEdge-P, Altum, Altum-PT처럼 밴드마다 TIFF를 따�
 캡처 하나의 밴드 파일(`IMG_0001_1.tif` … `IMG_0001_6.tif`)을 모두 한 폴더에 두고, 이륙 전·착륙 후 패널 촬영 영상도 같은 폴더에 둠.
 폴더를 불러오면 자동으로 다중분광으로 인식하고, `정사 모자이크 생성`은 RGB와 같이 누름.
 
+만들 지수는 폴더를 불러온 뒤 `식생·수분 지수` 칸에서 고름 (v0.4.1부터). 마지막 선택을 기억하며, 처음 기본값은 NDVI·NDRE·GNDVI임.
+카메라에 필요한 밴드가 없는 지수는 고를 수 없음. 정사 모자이크를 만든 뒤에는 결과 칸의 `식생지수 다시 만들기`에서
+지수만 다시 만들 수 있음 (정렬·정사 모자이크는 그대로, 수십 초).
+
+| 지수 | 식 | 쓰임 |
+|---|---|---|
+| NDVI | (NIR − Red) / (NIR + Red) | 일반 식생 활력 |
+| NDRE | (NIR − RE) / (NIR + RE) | 생육 후기·밀식 작물, 질소 상태 (NDVI 포화 구간) |
+| GNDVI | (NIR − Green) / (NIR + Green) | 엽록소 농도 |
+| NDWI | (Green − NIR) / (Green + NIR) | 수면·물 (McFeeters) |
+| OSAVI | (NIR − Red) / (NIR + Red + 0.16) | 토양이 많이 보이는 초기 생육 |
+| SAVI | 1.5 · (NIR − Red) / (NIR + Red + 0.5) | 토양 영향 보정 |
+| EVI | 2.5 · (NIR − Red) / (NIR + 6·Red − 7.5·Blue + 1) | 밀식 식생, 대기 영향 완화 (Blue 필요) |
+| CIre | NIR / RE − 1 | 엽록소 (적색경계) |
+| CIg | NIR / Green − 1 | 엽록소 (녹색) |
+
 처리 방식
 
 - 정렬은 기준 밴드(팬크로매틱, 없으면 Green)로 하고, 정사 단계에서 모든 밴드를 각자 카메라로 투영함
@@ -187,8 +203,8 @@ MicaSense RedEdge-MX, RedEdge-P, Altum, Altum-PT처럼 밴드마다 TIFF를 따�
 결과
 
 - `orthomosaic.tif`: 밴드별 반사율(float32, 0~1, 값 없음은 NaN), 밴드 이름이 밴드 설명에 기록됨. 파장 순서(예: Blue, Green, Red, Red edge, NIR)
-- `indices.tif`: NDVI, NDRE, GNDVI (있는 밴드로 계산 가능한 것만)
-- `preview.png`: 반사율 컬러 미리보기, `ndvi.png`: NDVI 색 미리보기 (레이어 `식생지수`)
+- `indices/<지수>.tif`: 고른 지수마다 한 파일 (float32, 값 없음은 NaN). `indices/<지수>.png`는 지도 표시용
+- `preview.png`: 반사율 컬러 미리보기. 지도의 `지수` 레이어에서 지수를 골라 볼 수 있음
 - 출력 GSD는 다중분광 밴드의 원본 해상도임 (팬크로매틱 해상도가 아님)
 
 한계
@@ -213,8 +229,7 @@ MicaSense RedEdge-MX, RedEdge-P, Altum, Altum-PT처럼 밴드마다 TIFF를 따�
     ├── dsm.tif            처리에 사용한 간이 DSM
     ├── preview.png        미리보기
     ├── report.json        처리 보고서 (정합 수, 오차, 단계별 시간, 메모리, 경고, 보정 결과)
-    ├── indices.tif        식생지수 NDVI·NDRE·GNDVI (다중분광)
-    ├── ndvi.png           NDVI 미리보기 (다중분광)
+    ├── indices/           고른 식생·수분 지수 (다중분광): <지수>.tif, 표시용 <지수>.png
     └── project/           정밀 보정용 정합 결과
         ├── edits.json     GCP, 사진 표시 위치, 타이포인트, 삭제한 점, 자동 제거 기준
         ├── msref/         다중분광 기준 밴드의 8비트 사진 (정렬·사진 보기용)

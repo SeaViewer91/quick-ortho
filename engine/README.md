@@ -88,6 +88,7 @@ python -m quickortho_engine render <결과 폴더>      # 저장된 정렬 결�
 | `--no-color-balance` | 끔 | 영상 간 밝기·색 차이 보정을 하지 않음 |
 | `--radiometry` | auto | 다중분광 반사율 환산: `auto`, `dls+panel`, `dls`, `panel`, `radiance` |
 | `--no-ms-normalize` | 끔 | 다중분광 캡처 간 반사율 블록 조정을 하지 않음 |
+| `--indices` | NDVI,NDRE,GNDVI | 다중분광 지수, 쉼표 구분 (NDVI, NDRE, GNDVI, NDWI, OSAVI, SAVI, EVI, CIre, CIg). `none`이면 만들지 않음 |
 | `--max-image-size` | 2000 | 특징점 추출용 영상 긴 변(px) |
 | `--max-features` | 4096 | 영상당 최대 특징점 수 |
 | `--threads` | -1 | 스레드 수 (-1은 전체 코어) |
@@ -175,7 +176,9 @@ python -m quickortho_engine render <결과 폴더>      # 저장된 정렬 결�
    Tukey 반복 재가중, 관측이 적은 캡처는 이득 1 쪽으로, 캡처 이득 평균은 1로 고정(전체 반사율 수준 유지)
 7. **정사투영**: 심라인은 기준 밴드 카메라로 화소마다 한 번 고르고, 모든 밴드를 그 영상에서 각자 카메라로 DSM에 투영해 읽음.
    모든 밴드가 있는 화소만 유효(나머지 NaN). 출력 GSD는 출력 밴드의 원본 GSD
-8. **산출물**: 반사율 COG(float32, 예측자 3), `indices.tif`(NDVI·NDRE·GNDVI), `preview.png`(반사율 컬러), `ndvi.png`
+8. **산출물**: 반사율 COG(float32, 예측자 3), `indices/<지수>.tif`(고른 지수만, 지수마다 COG)와 표시용 `<지수>.png`,
+   `preview.png`(반사율 컬러). 고른 지수는 `project/meta.json`에 저장되어 `render`·`refine`도 같은 지수를 만듦.
+   `indices <결과 폴더> --indices NDVI,NDWI` 명령은 정사 모자이크를 다시 만들지 않고 지수만 다시 만듦
 
 공개 시험 데이터(OpenDroneMap Bürgewald 부분집합, RedEdge-P 24캡처, CC0, 고도 약 21m) 결과
 

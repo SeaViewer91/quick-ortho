@@ -27,10 +27,10 @@ from .ms_ortho import (
     normalize_captures,
     refine_rig,
     render_ms_orthomosaic,
-    write_index_preview,
-    write_indices,
     write_rgb_preview,
 )
+from .indices import legend as index_legend
+from .indices import normalize_selection, write_indices
 from .ortho import build_views, finalize_cog, native_gsd, render_orthomosaic
 from .geo import Projector
 from .project import Project, to_absolute
@@ -49,6 +49,7 @@ class OrthoOptions:
     color_balance: bool = True  # 영상 간 밝기·색 차이 보정 (심라인 이음매 단차 제거). 다중분광에서는 쓰지 않음
     radiometry: str = "auto"  # 다중분광 반사율 환산: auto, dls+panel, dls, panel, radiance
     ms_normalize: bool = True  # 다중분광 캡처 간 반사율 블록 조정 (타이포인트 기준, 전체 수준은 유지)
+    indices: list[str] | None = None  # 다중분광 지수 (None: 기본 NDVI·NDRE·GNDVI, []: 만들지 않음)
     sfm: SfmOptions = field(default_factory=SfmOptions)
 
 
@@ -79,6 +80,8 @@ class PeakMemory:
 
 def run_ortho(folder: Path, out_dir: Path, opts: OrthoOptions, out: Emitter) -> dict:
     t_start = time.perf_counter()
+    if opts.indices is not None:  # 지수 이름은 오래 걸리는 처리 전에 검사하고 정리해 둠
+        opts = replace(opts, indices=normalize_selection(opts.indices))
     folder = Path(folder)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -194,7 +197,8 @@ def _align(folder, images, gps, work, opts, out, timings, warnings, ms_source=No
     # 이후 정사 모자이크 단계에서 실패하면 이 상태(정렬 결과만 있음)에서 run_render로 이어서 만들 수 있다.
     Project(out_dir).save_base(rec, geo.projector.epsg, geo.origin)
     Project(out_dir).save_meta(
-        folder, gps, __version__, render={"gsd_m": opts.gsd_m, "gsd_scale": opts.gsd_scale}, ms_source=ms_source
+        folder, gps, __version__, render={"gsd_m": opts.gsd_m, "gsd_scale": opts.gsd_scale, "indices": opts.indices},
+        ms_source=ms_source
     )
     (out_dir / "report.json").unlink(missing_ok=True)
     return rec, sfm_stats, geo
@@ -222,7 +226,7 @@ def render_options(meta: dict) -> OrthoOptions:
     except ValueError:
         ver = (0,)
     scale = render.get("gsd_scale", 1.0) if ver >= (0, 3, 0) else 1.0
-    return OrthoOptions(gsd_m=render.get("gsd_m"), gsd_scale=scale)
+    return OrthoOptions(gsd_m=render.get("gsd_m"), gsd_scale=scale, indices=render.get("indices"))
 
 
 def align_report_from_project(proj: Project) -> dict:
@@ -431,17 +435,11 @@ def _render_ms(views, sources, ds, radiometry, dsm, dsm_res, bounds, crs, gsd, s
     tmp.unlink(missing_ok=True)
     preview = write_rgb_preview(final, out_dir / "preview.png", names)
     outputs = {"orthomosaic": str(final), "dsm": str(out_dir / "dsm.tif"), "preview": str(out_dir / "preview.png")}
-    itmp = out_dir / "indices.tmp.tif"
-    index_names = write_indices(final, itmp, names)
-    if index_names:
-        finalize_cog(itmp, out_dir / "indices.tif")
-        write_index_preview(out_dir / "indices.tif", out_dir / "ndvi.png", band=1)
-        outputs["indices"] = str(out_dir / "indices.tif")
-        outputs["index_preview"] = str(out_dir / "ndvi.png")
-    else:
-        for p in (out_dir / "indices.tif", out_dir / "ndvi.png"):
-            p.unlink(missing_ok=True)
-    itmp.unlink(missing_ok=True)
+    selected = normalize_selection(opts.indices)
+    tifs, pngs, skipped = write_indices(final, out_dir, names, selected, finalize_cog)
+    if tifs:
+        outputs["indices"] = tifs
+        outputs["index_previews"] = pngs
     corners = _corners_lonlat(final)
     timings["finalize_s"] = time.perf_counter() - t0
     any_cap = next(iter(ds.captures.values()))
@@ -454,7 +452,9 @@ def _render_ms(views, sources, ds, radiometry, dsm, dsm_res, bounds, crs, gsd, s
             "reference_band": any_cap[ds.ref_index].band,
             "values": "radiance" if radiometry["mode"] == "radiance" else "reflectance",
             "radiometry": radiometry,
-            "indices": index_names,
+            "indices": list(tifs),
+            "index_legend": index_legend(list(tifs)),
+            "indices_skipped": skipped,
             **preview,
         },
         "outputs": outputs,
@@ -509,3 +509,33 @@ def _write_preview(path: Path, png_path: Path, max_size: int = 2048) -> None:
     from PIL import Image
 
     Image.fromarray(np.moveaxis(data, 0, -1), "RGBA").save(png_path)
+
+
+def make_indices(ortho_dir: Path, selected: list[str] | None, out: Emitter) -> dict:
+    """이미 만든 다중분광 정사 모자이크에서 지수만 다시 만든다 (정렬·정사투영 생략). 보고서와 저장된 설정도 갱신."""
+    ortho_dir = Path(ortho_dir)
+    report_path = ortho_dir / "report.json"
+    final = ortho_dir / "orthomosaic.tif"
+    if not report_path.exists() or not final.exists():
+        raise RuntimeError("정사 모자이크 결과가 없음. 먼저 정사 모자이크를 생성해야 함")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    ms_info = report.get("multispectral")
+    if not ms_info:
+        raise RuntimeError("다중분광 결과가 아니라 지수를 만들 수 없음")
+    names = [b["name"] for b in ms_info["bands"]]
+    chosen = normalize_selection(selected)
+    out.stage("finalize", f"지수 생성 ({', '.join(chosen) or '없음'})")
+    t0 = time.perf_counter()
+    tifs, pngs, skipped = write_indices(final, ortho_dir, names, chosen, finalize_cog)
+    outputs = {k: v for k, v in report.get("outputs", {}).items() if k not in ("indices", "index_previews", "index_preview")}
+    if tifs:
+        outputs["indices"] = tifs
+        outputs["index_previews"] = pngs
+    report["outputs"] = outputs
+    ms_info.update(indices=list(tifs), index_legend=index_legend(list(tifs)), indices_skipped=skipped)
+    report.setdefault("timings_s", {})["indices_s"] = round(time.perf_counter() - t0, 2)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    proj = Project(ortho_dir)
+    if proj.exists():
+        proj.update_render(indices=chosen)
+    return report

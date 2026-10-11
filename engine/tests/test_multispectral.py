@@ -11,13 +11,14 @@ from PIL import Image, TiffImagePlugin
 from pyproj import CRS
 
 from quickortho_engine import multispectral as ms
+from quickortho_engine.indices import available_indices, index_catalog, normalize_selection, write_indices
 from quickortho_engine.ms_ortho import (
     build_band_sources,
     refine_rig,
     render_ms_orthomosaic,
     solve_capture_gains,
-    write_indices,
 )
+from quickortho_engine.ortho import finalize_cog
 from quickortho_engine.ortho import View, _footprint
 from quickortho_engine.protocol import Emitter
 from quickortho_engine.surface import Dsm
@@ -242,7 +243,7 @@ def test_capture_gains_remove_offsets_keep_level():
     assert before > 0.08 and after < 0.02
 
 
-def test_write_indices(tmp_path: Path):
+def _refl(tmp_path: Path) -> Path:
     src = tmp_path / "r.tif"
     data = np.stack([np.full((4, 4), 0.1), np.full((4, 4), 0.05), np.full((4, 4), 0.5)]).astype(np.float32)
     data[:, 0, 0] = np.nan
@@ -250,10 +251,44 @@ def test_write_indices(tmp_path: Path):
             "crs": CRS.from_epsg(32652), "transform": rasterio.transform.from_origin(0, 4, 1, 1)}
     with rasterio.open(src, "w", **prof) as d:
         d.write(data)
-    names = write_indices(src, tmp_path / "i.tif", ["Green", "Red", "NIR"])
-    assert names == ["NDVI", "GNDVI"]
-    with rasterio.open(tmp_path / "i.tif") as d:
+    return src
+
+
+def test_write_selected_indices_only(tmp_path: Path):
+    src = _refl(tmp_path)
+    bands = ["Green", "Red", "NIR"]
+    tifs, pngs, skipped = write_indices(src, tmp_path, bands, ["NDVI", "NDWI", "NDRE"], finalize_cog)
+    assert list(tifs) == ["NDVI", "NDWI"] and skipped == ["NDRE"]  # Red edge 밴드가 없어 NDRE는 건너뜀
+    assert sorted(p.name for p in (tmp_path / "indices").iterdir()) == ["NDVI.png", "NDVI.tif", "NDWI.png", "NDWI.tif"]
+    with rasterio.open(tifs["NDVI"]) as d:
         ndvi = d.read(1)
-        assert d.descriptions == ("NDVI", "GNDVI")
+        assert d.descriptions == ("NDVI",)
     assert ndvi[1, 1] == pytest.approx((0.5 - 0.05) / 0.55)
     assert np.isnan(ndvi[0, 0])
+    # 다시 만들면 고르지 않은 지수 파일은 지워짐
+    tifs, _, _ = write_indices(src, tmp_path, bands, ["GNDVI"], finalize_cog)
+    assert list(tifs) == ["GNDVI"]
+    assert sorted(p.name for p in (tmp_path / "indices").iterdir()) == ["GNDVI.png", "GNDVI.tif"]
+    tifs, _, _ = write_indices(src, tmp_path, bands, [], finalize_cog)
+    assert tifs == {} and not (tmp_path / "indices").exists()
+
+
+def test_index_selection_and_catalog():
+    assert normalize_selection(None) == ["NDVI", "NDRE", "GNDVI"]
+    assert normalize_selection(["gndvi", "ndvi", "NDVI"]) == ["NDVI", "GNDVI"]  # 대소문자·중복 정리, 등록 순서
+    with pytest.raises(ValueError):
+        normalize_selection(["XYZ"])
+    rededge = ["Blue", "Green", "Red", "Red edge", "NIR"]
+    assert set(available_indices(rededge)) == {"NDVI", "NDRE", "GNDVI", "NDWI", "OSAVI", "SAVI", "EVI", "CIre", "CIg"}
+    cat = {c["name"]: c for c in index_catalog(["Green", "Red", "NIR"])}
+    assert cat["NDVI"]["available"] and not cat["EVI"]["available"] and cat["NDRE"]["default"]
+
+
+def test_rgb_preview_from_reflectance(tmp_path: Path):
+    from quickortho_engine.ms_ortho import write_rgb_preview
+
+    src = _refl(tmp_path)
+    info = write_rgb_preview(src, tmp_path / "p.png", ["Green", "Red", "NIR"])
+    assert info["preview"] == "false_color"  # Blue가 없으면 NIR·Red·Green 위색
+    im = np.asarray(Image.open(tmp_path / "p.png"))
+    assert im.shape == (4, 4, 4) and im[0, 0, 3] == 0 and im[1, 1, 3] == 255

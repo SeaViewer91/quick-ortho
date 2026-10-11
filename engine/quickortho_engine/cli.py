@@ -43,6 +43,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="다중분광 반사율 환산 방식 (기본 auto: 패널·DLS 중 있는 것으로 최선)",
     )
     p_ortho.add_argument("--no-ms-normalize", action="store_true", help="다중분광 캡처 간 반사율 블록 조정을 끔")
+    p_ortho.add_argument(
+        "--indices", default=None,
+        help="다중분광 지수, 쉼표로 구분 (예: NDVI,NDRE). none이면 만들지 않음. 기본 NDVI,NDRE,GNDVI",
+    )
     p_ortho.add_argument("--max-image-size", type=int, default=2000, help="특징점 추출용 영상 긴 변(px)")
     p_ortho.add_argument("--max-features", type=int, default=4096, help="영상당 최대 특징점 수")
     p_ortho.add_argument("--threads", type=int, default=-1, help="스레드 수 (-1: 전체)")
@@ -71,6 +75,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_ren = sub.add_parser("render", help="저장된 정렬 결과로 DSM·정사 모자이크만 다시 생성 (SfM 생략)")
     p_ren.add_argument("ortho_dir", type=Path, help="정사 모자이크 결과 폴더")
+
+    p_idx = sub.add_parser("indices", help="다중분광 정사 모자이크에서 지수만 다시 생성 (정렬·정사 생략)")
+    p_idx.add_argument("ortho_dir", type=Path, help="정사 모자이크 결과 폴더")
+    p_idx.add_argument("--indices", default=None, help="지수, 쉼표로 구분 (none이면 지수 파일을 모두 지움)")
 
     p_ref = sub.add_parser("refine", help="수정 사항을 적용해 번들 조정 후 정사 모자이크 재생성")
     p_ref.add_argument("ortho_dir", type=Path)
@@ -123,6 +131,7 @@ def _dispatch(args: argparse.Namespace, out: Emitter) -> None:
             color_balance=not args.no_color_balance,
             radiometry=args.radiometry,
             ms_normalize=not args.no_ms_normalize,
+            indices=_parse_indices(args.indices),
             sfm=SfmOptions(
                 max_image_size=args.max_image_size,
                 max_num_features=args.max_features,
@@ -149,6 +158,10 @@ def _dispatch(args: argparse.Namespace, out: Emitter) -> None:
         from .pipeline import run_render
 
         out.result("render", run_render(args.ortho_dir, out))
+    elif args.command == "indices":
+        from .pipeline import make_indices
+
+        out.result("indices", make_indices(args.ortho_dir, _parse_indices(args.indices), out))
     elif args.command == "refine":
         from .refine import run_refine
 
@@ -196,6 +209,16 @@ def serve(stdin=None, stdout=None) -> int:
             code = 1
         base._emit({"type": "done", "job": job, "code": code})
     return 0
+
+
+def _parse_indices(value: str | None) -> list[str] | None:
+    """--indices 값: 없으면 None(기본), "none"·빈 문자열이면 [], 아니면 쉼표 목록."""
+    if value is None:
+        return None
+    v = value.strip()
+    if v.lower() in ("", "none"):
+        return []
+    return [x.strip() for x in v.split(",") if x.strip()]
 
 
 def main(argv: list[str] | None = None) -> int:

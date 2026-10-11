@@ -285,3 +285,48 @@ button:disabled {
   background: rgba(31, 111, 235, 0.08);
   border: 1px solid rgba(31, 111, 235, 0.35);
 }
+
+/* 다중분광 지수 선택 */
+.index-picker {
+  border: 1px solid var(--border, #d0d5dc);
+  border-radius: 6px;
+  padding: 6px 10px 4px;
+  margin: 8px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+.index-picker legend {
+  font-size: 12px;
+  padding: 0 4px;
+}
+.index-picker label {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.index-picker p {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+}
+.index-layer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.index-layer select {
+  font-size: 13px;
+}
+.index-legend .legend-name {
+  width: auto;
+  height: auto;
+  background: none;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.remake {
+  margin-top: 8px;
+}
+.remake summary {
+  cursor: pointer;
+  font-size: 13px;
+}

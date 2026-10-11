@@ -87,6 +87,12 @@ class Project:
             meta["multispectral"] = {"source_dir": str(Path(ms_source).resolve())}
         (self.dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
 
+    def update_render(self, **values) -> None:
+        """저장된 정사 모자이크 설정(meta.json의 render)을 일부 바꾼다 (다시 만들 때 이 값을 씀)."""
+        meta = self.meta()
+        meta.setdefault("render", {}).update(values)
+        (self.dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+
     def meta(self) -> dict:
         return json.loads((self.dir / "meta.json").read_text(encoding="utf-8"))
 
