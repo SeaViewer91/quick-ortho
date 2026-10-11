@@ -39,7 +39,7 @@ type Props = {
 type Tab = "gcp" | "tie" | "clean";
 type Progress = { message: string; current: number; total: number };
 
-const LAYERS: Layers = { quicklook: false, coverage: false, footprints: false, gaps: false, ortho: true };
+const LAYERS: Layers = { quicklook: false, coverage: false, footprints: false, gaps: false, ortho: true, index: false };
 const THRESHOLDS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
 const MODE_LABEL = { gps: "GPS 정렬", gcp: "GCP 보정", gcp_shift: "GCP 평행 이동" } as const;
 

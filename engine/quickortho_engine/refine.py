@@ -304,7 +304,7 @@ def gcp_table(rec: pycolmap.Reconstruction, gcps: list[dict], frame: Frame) -> t
 
 
 def run_refine(ortho_dir: Path, out: Emitter, reset: bool = False) -> dict:
-    from .pipeline import PeakMemory, render_options, render_products
+    from .pipeline import PeakMemory, ms_dataset_from_meta, render_options, render_products
 
     t_start = time.perf_counter()
     proj = Project(ortho_dir)
@@ -388,7 +388,8 @@ def run_refine(ortho_dir: Path, out: Emitter, reset: bool = False) -> dict:
                 s, R, t = umeyama(src, dst)
                 apply_sim3(rec, s, R, t)
                 gcp_pids = {add_point(rec, gcp_in_frame(g, frame), resolve_marks(rec, g["obs"])) for g in usable}
-                intr = refine_intrinsics_ok(rec, dst)
+                # 다중분광은 밴드 카메라가 메타데이터 내부표정을 전제로 하므로 기준 밴드 내부표정도 고정
+                intr = refine_intrinsics_ok(rec, dst) and not meta.get("multispectral")
                 bundle_adjust(rec, constant_points=gcp_pids, refine_intrinsics=intr)
                 if thr:
                     n2 = filter_large_errors(rec, float(thr), protect=protect | gcp_pids)
@@ -459,7 +460,10 @@ def run_refine(ortho_dir: Path, out: Emitter, reset: bool = False) -> dict:
 
         # 6) 정사 모자이크 재생성
         opts = render_options(meta)
-        products = render_products(to_absolute(rec, frame), image_dir, proj.ortho_dir, frame.epsg, opts, out, timings)
+        products = render_products(
+            to_absolute(rec, frame), image_dir, proj.ortho_dir, frame.epsg, opts, out, timings,
+            ms_ds=ms_dataset_from_meta(meta),
+        )
 
     timings["total_s"] = time.perf_counter() - t_start
     report = dict(base_report)

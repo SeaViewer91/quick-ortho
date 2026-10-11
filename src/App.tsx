@@ -19,6 +19,7 @@ import {
   type AppInfo,
   type EngineReady,
   type EngineEvent,
+  type MultispectralInfo,
   type OrthoResult,
   type PreviewResult,
 } from "./api";
@@ -53,7 +54,9 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [ortho, setOrtho] = useState<OrthoResult | null>(null);
-  const [overlays, setOverlays] = useState<{ quicklook?: Overlay; coverage?: Overlay; ortho?: Overlay }>({});
+  const [overlays, setOverlays] = useState<{ quicklook?: Overlay; coverage?: Overlay; ortho?: Overlay; index?: Overlay }>(
+    {},
+  );
   const [geojson, setGeojson] = useState<FeatureCollection>();
   const [layers, setLayers] = useState<Layers>({
     quicklook: true,
@@ -61,6 +64,7 @@ function App() {
     footprints: true,
     gaps: true,
     ortho: true,
+    index: false,
   });
   const [refineOpen, setRefineOpen] = useState(false);
   /** 정렬(SfM)은 끝났지만 정사 모자이크 단계에서 중단된 결과가 있음 → 정렬을 건너뛰고 이어서 만들 수 있음 */
@@ -123,13 +127,21 @@ function App() {
     }
   }
 
+  /** 정사 모자이크 결과의 지도 오버레이 (다중분광이면 식생지수 미리보기도). */
+  async function orthoOverlays(rep: OrthoResult): Promise<{ ortho: Overlay; index?: Overlay }> {
+    const corners = rep.preview_corners_lonlat;
+    const url = await readPng(rep.outputs.preview);
+    const idx = rep.outputs.index_preview ? await readPng(rep.outputs.index_preview).catch(() => undefined) : undefined;
+    return { ortho: { url, corners }, index: idx ? { url: idx, corners } : undefined };
+  }
+
   /** 이전에 만든 정사 모자이크가 있으면 불러온다 (보정 작업을 이어서 하기 위해). */
   async function loadExistingOrtho(dir: string) {
     try {
       const rep = await readJson<OrthoResult>(joinPath(resultDir(dir, "ortho"), "report.json"));
-      const url = await readPng(rep.outputs.preview);
+      const ov = await orthoOverlays(rep);
       setOrtho(rep);
-      setOverlays((o) => ({ ...o, ortho: { url, corners: rep.preview_corners_lonlat } }));
+      setOverlays((o) => ({ ...o, ...ov }));
       setLayers((l) => ({ ...l, ortho: true, coverage: false }));
     } catch {
       // 정사 모자이크 결과가 없음. 정렬 결과만 남아 있으면 이어서 만들 수 있게 한다
@@ -157,10 +169,10 @@ function App() {
         onEvent,
         (j) => (jobRef.current = j.job_id),
       );
-      const url = await readPng(res.outputs.preview);
+      const ov = await orthoOverlays(res);
       setOrtho(res);
       setResumable(false);
-      setOverlays((o) => ({ ...o, ortho: { url, corners: res.preview_corners_lonlat } }));
+      setOverlays((o) => ({ ...o, ...ov }));
       setLayers((l) => ({ ...l, ortho: true, quicklook: false, coverage: false }));
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -173,9 +185,9 @@ function App() {
 
   /** 정밀 보정 결과를 반영한다. */
   async function applyRefined(rep: OrthoResult) {
-    const url = await readPng(rep.outputs.preview);
+    const ov = await orthoOverlays(rep);
     setOrtho(rep);
-    setOverlays((o) => ({ ...o, ortho: { url, corners: rep.preview_corners_lonlat } }));
+    setOverlays((o) => ({ ...o, ...ov }));
   }
 
   /** 간이 모자이크: 사용자가 버튼으로 실행한다. */
@@ -217,9 +229,9 @@ function App() {
     setError(null);
     try {
       const res = await runJob<OrthoResult>(() => startOrtho(folder), onEvent, (j) => (jobRef.current = j.job_id));
-      const url = await readPng(res.outputs.preview);
+      const ov = await orthoOverlays(res);
       setOrtho(res);
-      setOverlays((o) => ({ ...o, ortho: { url, corners: res.preview_corners_lonlat } }));
+      setOverlays((o) => ({ ...o, ...ov }));
       setLayers((l) => ({ ...l, ortho: true, quicklook: false, coverage: false }));
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -228,7 +240,7 @@ function App() {
         await readJson(joinPath(resultDir(folder, "ortho"), "report.json"));
       } catch {
         setOrtho(null);
-        setOverlays((o) => ({ ...o, ortho: undefined }));
+        setOverlays((o) => ({ ...o, ortho: undefined, index: undefined }));
         await checkResumable(folder);
       }
     } finally {
@@ -392,6 +404,7 @@ function App() {
                     <dd>{ortho.georef.gps_residual_rms_m.toFixed(2)} m</dd>
                   </>
                 ) : null}
+                {ortho.multispectral && <MultispectralStats ms={ortho.multispectral} />}
                 <dt>처리 시간</dt>
                 <dd>{ortho.timings_s?.total_s != null ? `${Math.round(ortho.timings_s.total_s)}초` : "-"}</dd>
                 <dt>최대 메모리</dt>
@@ -421,6 +434,21 @@ function App() {
                 <label>
                   <input type="checkbox" checked={layers.ortho} onChange={() => toggle("ortho")} /> 정사 모자이크
                 </label>
+              )}
+              {overlays.index && (
+                <label>
+                  <input type="checkbox" checked={layers.index} onChange={() => toggle("index")} /> 식생지수 (NDVI)
+                </label>
+              )}
+              {overlays.index && layers.index && (
+                <div className="legend">
+                  <span style={{ background: "#8c510a" }} />
+                  -0.2
+                  <span style={{ background: "#f6e8c3" }} />
+                  0.4
+                  <span style={{ background: "#1a9850" }} />
+                  0.9
+                </div>
               )}
               <label>
                 <input type="checkbox" checked={layers.coverage} onChange={() => toggle("coverage")} /> 중복도
@@ -480,3 +508,42 @@ function Warnings({ items }: { items: string[] }) {
 }
 
 export default App;
+
+const RADIOMETRY_LABELS: Record<string, string> = {
+  "dls+panel": "반사율 (패널+DLS)",
+  dls: "반사율 (DLS)",
+  panel: "반사율 (패널)",
+  radiance: "방사휘도 (반사율 보정 없음)",
+};
+
+function MultispectralStats({ ms }: { ms: MultispectralInfo }) {
+  const norm = ms.radiometry.capture_normalization;
+  const nb = norm?.applied && norm.bands ? Object.values(norm.bands) : [];
+  const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(xs.length, 1);
+  const residual = ms.radiometry.band_alignment?.residual;
+  const align = residual ? Math.max(...Object.values(residual).map((r) => Math.hypot(r.shift_px[0], r.shift_px[1]))) : null;
+  return (
+    <>
+      <dt>다중분광</dt>
+      <dd title={ms.bands.map((b) => `${b.name} ${b.wavelength_nm ?? "?"}nm`).join(", ")}>
+        {ms.model} · {ms.bands.length}밴드
+      </dd>
+      <dt>값</dt>
+      <dd>{RADIOMETRY_LABELS[ms.radiometry.mode] ?? ms.radiometry.mode}</dd>
+      {nb.length > 0 && (
+        <>
+          <dt>캡처 간 불일치</dt>
+          <dd>
+            {avg(nb.map((b) => b.inconsistency_before_pct)).toFixed(1)} → {avg(nb.map((b) => b.inconsistency_after_pct)).toFixed(1)}%
+          </dd>
+        </>
+      )}
+      {align != null && Number.isFinite(align) && (
+        <>
+          <dt>밴드 정합</dt>
+          <dd>잔차 {align.toFixed(2)} px</dd>
+        </>
+      )}
+    </>
+  );
+}

@@ -74,6 +74,7 @@ class Project:
         gps: dict[str, tuple[float, float, float]],
         engine_version: str,
         render: dict | None = None,
+        ms_source: Path | None = None,
     ) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         meta = {
@@ -82,6 +83,8 @@ class Project:
             "engine_version": engine_version,
             "render": render or {},
         }
+        if ms_source is not None:
+            meta["multispectral"] = {"source_dir": str(Path(ms_source).resolve())}
         (self.dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
 
     def meta(self) -> dict:

@@ -12,6 +12,7 @@ export type Layers = {
   footprints: boolean;
   gaps: boolean;
   ortho: boolean;
+  index: boolean;
 };
 
 export type MapLabel = { lon: number; lat: number; text: string; kind: "control" | "check" | "pick" | "active" };
@@ -21,6 +22,8 @@ type Props = {
   quicklook?: Overlay;
   coverage?: Overlay;
   ortho?: Overlay;
+  /** 다중분광 식생지수(NDVI) 미리보기 */
+  index?: Overlay;
   geojson?: FeatureCollection;
   layers: Layers;
   /** 정밀 보정: 타이포인트 오차 점 (properties: err, id, sel) */
@@ -43,10 +46,11 @@ const STYLE: maplibregl.StyleSpecification = {
 const IMAGE_LAYERS = [
   ["quicklook", "quicklook"],
   ["ortho", "ortho"],
+  ["index", "index"],
   ["coverage", "coverage"],
 ] as const;
 
-export default function MapView({ quicklook, coverage, ortho, geojson, layers, points, labels, onClick, crosshair }: Props) {
+export default function MapView({ quicklook, coverage, ortho, index, geojson, layers, points, labels, onClick, crosshair }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MlMap | null>(null);
   const ready = useRef<Promise<void> | null>(null);
@@ -143,7 +147,7 @@ export default function MapView({ quicklook, coverage, ortho, geojson, layers, p
 
   // 영상 오버레이 (간이 모자이크, 정사 모자이크, 중복도)
   useEffect(() => {
-    const overlays = { quicklook, ortho, coverage };
+    const overlays = { quicklook, ortho, index, coverage };
     ready.current?.then(() => {
       const m = map.current;
       if (!m) return;
@@ -179,7 +183,7 @@ export default function MapView({ quicklook, coverage, ortho, geojson, layers, p
         );
       }
     });
-  }, [quicklook, ortho, coverage]);
+  }, [quicklook, ortho, index, coverage]);
 
   useEffect(() => {
     ready.current?.then(() => {
@@ -195,13 +199,14 @@ export default function MapView({ quicklook, coverage, ortho, geojson, layers, p
       const set = (id: string, on: boolean) => m.getLayer(id) && m.setLayoutProperty(id, "visibility", vis(on));
       set("quicklook", layers.quicklook);
       set("ortho", layers.ortho);
+      set("index", layers.index);
       set("coverage", layers.coverage);
       set("footprints", layers.footprints);
       set("cameras", layers.footprints);
       set("gaps-fill", layers.gaps);
       set("gaps-line", layers.gaps);
     });
-  }, [layers, quicklook, ortho, coverage]);
+  }, [layers, quicklook, ortho, index, coverage]);
 
   useEffect(() => {
     ready.current?.then(() => {

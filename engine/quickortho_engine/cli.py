@@ -38,6 +38,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ortho.add_argument("--gsd", type=float, default=None, help="출력 GSD(m). 기본값은 원본 GSD × --gsd-scale")
     p_ortho.add_argument("--gsd-scale", type=float, default=1.0, help="원본 GSD 대비 출력 배율 (기본 1: 원본 해상도)")
     p_ortho.add_argument("--no-color-balance", action="store_true", help="영상 간 밝기·색 차이 보정을 끔")
+    p_ortho.add_argument(
+        "--radiometry", choices=["auto", "dls+panel", "dls", "panel", "radiance"], default="auto",
+        help="다중분광 반사율 환산 방식 (기본 auto: 패널·DLS 중 있는 것으로 최선)",
+    )
+    p_ortho.add_argument("--no-ms-normalize", action="store_true", help="다중분광 캡처 간 반사율 블록 조정을 끔")
     p_ortho.add_argument("--max-image-size", type=int, default=2000, help="특징점 추출용 영상 긴 변(px)")
     p_ortho.add_argument("--max-features", type=int, default=4096, help="영상당 최대 특징점 수")
     p_ortho.add_argument("--threads", type=int, default=-1, help="스레드 수 (-1: 전체)")
@@ -116,6 +121,8 @@ def _dispatch(args: argparse.Namespace, out: Emitter) -> None:
             gsd_scale=args.gsd_scale,
             keep_work=args.keep_work,
             color_balance=not args.no_color_balance,
+            radiometry=args.radiometry,
+            ms_normalize=not args.no_ms_normalize,
             sfm=SfmOptions(
                 max_image_size=args.max_image_size,
                 max_num_features=args.max_features,

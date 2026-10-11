@@ -45,12 +45,29 @@ export type OrthoResult = {
   };
   georef: { epsg: number; gps_residual_rms_m?: number; mode?: "gps" | "gcp" | "gcp_shift"; note?: string };
   ortho: { width: number; height: number; gsd_m: number };
-  outputs: { orthomosaic: string; dsm: string; preview: string };
+  outputs: { orthomosaic: string; dsm: string; preview: string; indices?: string; index_preview?: string };
+  multispectral?: MultispectralInfo;
   preview_corners_lonlat: Corners;
   timings_s: { total_s: number };
   peak_memory_mb: number;
   warnings: string[];
   refine?: RefineInfo;
+};
+
+export type MultispectralInfo = {
+  model: string;
+  bands: { name: string; wavelength_nm: number | null }[];
+  reference_band: string;
+  values: "reflectance" | "radiance";
+  indices: string[];
+  radiometry: {
+    mode: "dls+panel" | "dls" | "panel" | "radiance";
+    capture_normalization?: {
+      applied: boolean;
+      bands?: Record<string, { inconsistency_before_pct: number; inconsistency_after_pct: number }>;
+    };
+    band_alignment?: { residual?: Record<string, { shift_px: number[] }> };
+  };
 };
 
 export type AppInfo = { name: string; version: string; os: string; arch: string };
@@ -310,6 +327,7 @@ export const STAGE_LABELS: Record<string, string> = {
   mapping: "카메라 위치·자세 추정",
   georef: "좌표 정렬",
   dsm: "간이 DSM",
+  bands: "밴드 정합·반사율 보정",
   color: "밝기·색 보정",
   ortho: "정사투영",
   finalize: "마무리",

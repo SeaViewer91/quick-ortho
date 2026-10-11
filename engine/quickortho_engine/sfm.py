@@ -30,6 +30,10 @@ class SfmOptions:
     max_neighbor_distance_m: float = 500.0
     exhaustive_below: int = 40  # 이 장수 이하이거나 GPS가 없으면 전수 매칭
     min_registered_ratio: float = 0.8  # 전역 매핑 정합률이 이보다 낮으면 증분 매핑 재시도
+    # 내부표정을 메타데이터로 아는 카메라(다중분광 등): COLMAP 모델·파라미터 초깃값, 번들 조정에서 고정할지
+    camera_model: str | None = None
+    camera_params: str | None = None
+    fixed_intrinsics: bool = False
 
 
 class _RowCounter:
@@ -113,13 +117,16 @@ def run_sfm(
     ex.sift.first_octave = 0
     ex.sift.max_num_features = opts.max_num_features
     reader = pycolmap.ImageReaderOptions()
-    reader.camera_model = "OPENCV"
+    reader.camera_model = opts.camera_model or "OPENCV"
+    if opts.camera_params:
+        reader.camera_params = opts.camera_params
     _run_with_progress(
         lambda: pycolmap.extract_features(
             db_path,
             image_dir,
             image_names=image_names,
-            camera_mode=pycolmap.CameraMode.AUTO,  # 같은 카메라끼리 내부표정 공유
+            # 같은 카메라끼리 내부표정 공유 (파라미터를 주면 모든 영상이 한 카메라)
+            camera_mode=pycolmap.CameraMode.SINGLE if opts.camera_params else pycolmap.CameraMode.AUTO,
             reader_options=reader,
             extraction_options=ex,
             device=pycolmap.Device.cpu,
@@ -168,6 +175,11 @@ def run_sfm(
     out.stage("mapping", "카메라 위치·자세 추정 (전역 SfM)")
     gopts = pycolmap.GlobalPipelineOptions()
     gopts.num_threads = opts.num_threads
+    if opts.fixed_intrinsics:
+        ba = gopts.mapper.bundle_adjustment
+        ba.refine_focal_length = False
+        ba.refine_principal_point = False
+        ba.refine_extra_params = False
     recs = pycolmap.global_mapping(db_path, image_dir, work_dir / "sparse_global", options=gopts)
     best = _largest(recs)
     stats["mapper"] = "global"
@@ -177,6 +189,10 @@ def run_sfm(
         out.stage("mapping", "카메라 위치·자세 추정 (증분 SfM)")
         iopts = pycolmap.IncrementalPipelineOptions()
         iopts.num_threads = opts.num_threads
+        if opts.fixed_intrinsics:
+            iopts.ba_refine_focal_length = False
+            iopts.ba_refine_principal_point = False
+            iopts.ba_refine_extra_params = False
         recs_i = pycolmap.incremental_mapping(
             db_path, image_dir, work_dir / "sparse_incremental", options=iopts
         )

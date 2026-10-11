@@ -1,6 +1,6 @@
 [package]
 name = "quick-ortho"
-version = "0.3.1"
+version = "0.4.0"
 description = "Offline drone orthomosaic generator for field laptops"
 authors = ["Suho Bak"]
 license = "MIT"
