@@ -93,6 +93,8 @@ export type MultispectralInfo = {
 export type AppInfo = { name: string; version: string; os: string; arch: string };
 
 export const appInfo = () => invoke<AppInfo>("app_info");
+/** 사용 매뉴얼(앱에 포함된 HTML, 없으면 GitHub)을 기본 브라우저로 연다 */
+export const openManual = () => invoke<"local" | "web">("open_manual");
 
 export type EngineReady = { ok: boolean; version?: string; warmup_s?: number; error?: string };
 export type EngineStatus = { running: boolean; busy: number | null; ready: EngineReady | null; command: string };

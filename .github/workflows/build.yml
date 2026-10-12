@@ -29,6 +29,19 @@ jobs:
           pip install -e ".[dev]"
           pytest -q
 
+      # 사용 매뉴얼 HTML (릴리스 첨부용). 앱 번들용은 app 작업에서 따로 만듦
+      - name: 매뉴얼 HTML
+        run: |
+          pip install markdown-it-py==4.2.0
+          VERSION=$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          python scripts/build_manual.py --version "$VERSION" --out "manual/QuickOrtho_${VERSION}_manual.html"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: QuickOrtho-manual
+          path: manual/*.html
+          if-no-files-found: error
+
   app:
     needs: engine-test
     strategy:
@@ -78,6 +91,11 @@ jobs:
           rm serve.log
           du -sh .
 
+      - name: 매뉴얼 HTML (앱에 포함)
+        run: |
+          pip install markdown-it-py==4.2.0
+          python scripts/build_manual.py --out build/manual/manual.html
+
       - name: 프론트엔드 의존성 설치
         run: npm ci
 
@@ -122,9 +140,10 @@ jobs:
         run: |
           NOTES="docs/release-notes/${GITHUB_REF_NAME}.md"
           [ -f "$NOTES" ] || NOTES=/dev/null
-          find artifacts -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \) -print
+          FILES=$(find artifacts -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' -o -name '*_manual.html' \))
+          echo "$FILES"
           gh release create "$GITHUB_REF_NAME" \
             --title "QuickOrtho ${GITHUB_REF_NAME}" \
             --notes-file "$NOTES" \
             --latest \
-            $(find artifacts -type f \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \))
+            $FILES

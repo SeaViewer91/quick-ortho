@@ -262,6 +262,27 @@ button:disabled {
   font-size: 12px;
 }
 
+.footer-left {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  color: var(--text);
+}
+
 .actions {
   display: flex;
   flex-direction: column;

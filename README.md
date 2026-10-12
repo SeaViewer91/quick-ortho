@@ -36,6 +36,7 @@
 | Windows 10 / 11 (x64) | - |
 
 설치 방법, 사용 순서, 결과 파일, 문제 해결은 [사용 매뉴얼](docs/MANUAL.md)을 참고함.
+같은 내용의 오프라인용 HTML이 릴리스마다 첨부되며(`QuickOrtho_<버전>_manual.html`), 앱 하단 `사용 매뉴얼`로도 열 수 있음.
 
 ## 개발 환경 구성
 
@@ -58,6 +59,8 @@ npm run tauri dev
 - 앱은 시작할 때 엔진을 상주 모드(`serve`)로 한 번 띄워 두고 작업마다 재사용함
 - 엔진 경로 우선순위: 환경변수 `QUICKORTHO_ENGINE` → 설치본에 포함된 엔진 → `engine/.venv` → 시스템 파이썬
 - 결과는 영상 폴더 옆의 `<폴더명>_QuickOrtho/` 아래에 저장됨 (`preview/`, `ortho/`)
+- 매뉴얼 HTML 미리보기: `pip install markdown-it-py==4.2.0` 후 `python3 scripts/build_manual.py --out build/manual/manual.html`.
+  개발 모드의 `사용 매뉴얼` 버튼은 이 파일을 열고, 없으면 GitHub 매뉴얼을 엶
 
 ## 사용 방법 (개발 버전)
 
@@ -74,6 +77,7 @@ src-tauri/    데스크톱 셸 (Tauri 2, Rust)
 engine/       처리 엔진 사이드카 (Python)
 .github/      빌드 워크플로 (macOS arm64, Windows x64 설치파일 생성, v* 태그 시 릴리스)
 docs/         사용 매뉴얼, 릴리스 노트
+scripts/      개발·배포 보조 스크립트 (매뉴얼 HTML 생성)
 ```
 
 ## 릴리스 절차
@@ -83,6 +87,7 @@ docs/         사용 매뉴얼, 릴리스 노트
 2. `docs/release-notes/v<버전>.md`에 릴리스 노트를 작성함
 3. 커밋·push 후 태그를 push함: `git tag v<버전> && git push origin v<버전>`
 4. CI가 태그와 버전 일치를 확인하고, 설치파일을 빌드해 정식 릴리스(최신)로 게시함.
+   `docs/MANUAL.md`로 만든 HTML 매뉴얼(`QuickOrtho_<버전>_manual.html`)도 함께 첨부하고, 앱 안에도 넣음.
    시험용으로 올릴 때는 게시 후 `gh release edit v<버전> --prerelease`로 사전 릴리스로 바꿈
 
 ## 라이선스

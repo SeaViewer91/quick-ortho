@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   appInfo,
+  openManual,
   cancelEngine,
   engineStatus,
   onEngineReady,
@@ -586,11 +587,21 @@ function App() {
       )}
 
       <footer className="app-footer">
-        {info && (
-          <span>
-            {info.name} v{info.version} · {info.os}/{info.arch}
-          </span>
-        )}
+        <span className="footer-left">
+          {info && (
+            <span>
+              {info.name} v{info.version} · {info.os}/{info.arch}
+            </span>
+          )}
+          <button
+            type="button"
+            className="link-button"
+            title="사용 매뉴얼을 브라우저로 엶 (인터넷 없이 열림)"
+            onClick={() => openManual().catch((e) => setError(`매뉴얼을 열 수 없음: ${e}`))}
+          >
+            사용 매뉴얼
+          </button>
+        </span>
         <span className={`engine-state ${engine ? (engine.ok ? "ok" : "bad") : ""}`}>
           {engine === null
             ? "엔진 준비 중"

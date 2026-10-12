@@ -2,7 +2,8 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "resources": {
-      "../engine/dist/quickortho-engine/": "engine/"
+      "../engine/dist/quickortho-engine/": "engine/",
+      "../build/manual/manual.html": "manual/manual.html"
     }
   }
 }
