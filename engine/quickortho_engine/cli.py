@@ -39,6 +39,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ortho.add_argument("--gsd-scale", type=float, default=1.0, help="원본 GSD 대비 출력 배율 (기본 1: 원본 해상도)")
     p_ortho.add_argument("--no-color-balance", action="store_true", help="영상 간 밝기·색 차이 보정을 끔")
     p_ortho.add_argument(
+        "--water",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="수면 처리: 수면 특징점 제외, DSM 수면 평면 (기본 auto: 영상 면적의 5%% 이상이 수면이면 켬)",
+    )
+    p_ortho.add_argument(
         "--radiometry", choices=["auto", "dls+panel", "dls", "panel", "radiance"], default="auto",
         help="다중분광 반사율 환산 방식 (기본 auto: 패널·DLS 중 있는 것으로 최선)",
     )
@@ -132,6 +138,7 @@ def _dispatch(args: argparse.Namespace, out: Emitter) -> None:
             radiometry=args.radiometry,
             ms_normalize=not args.no_ms_normalize,
             indices=_parse_indices(args.indices),
+            water=args.water,
             sfm=SfmOptions(
                 max_image_size=args.max_image_size,
                 max_num_features=args.max_features,

@@ -20,6 +20,7 @@ from rasterio.transform import from_origin
 
 from . import __version__
 from . import multispectral as msp
+from . import water as wat
 from .color import estimate_gains
 from .ms_ortho import (
     band_gsd,
@@ -50,6 +51,7 @@ class OrthoOptions:
     radiometry: str = "auto"  # 다중분광 반사율 환산: auto, dls+panel, dls, panel, radiance
     ms_normalize: bool = True  # 다중분광 캡처 간 반사율 블록 조정 (타이포인트 기준, 전체 수준은 유지)
     indices: list[str] | None = None  # 다중분광 지수 (None: 기본 NDVI·NDRE·GNDVI, []: 만들지 않음)
+    water: str = "auto"  # 수면 처리: auto(수면이 넓으면 켬), on, off. 다중분광에서는 쓰지 않음
     sfm: SfmOptions = field(default_factory=SfmOptions)
 
 
@@ -82,6 +84,7 @@ def run_ortho(folder: Path, out_dir: Path, opts: OrthoOptions, out: Emitter) -> 
     t_start = time.perf_counter()
     if opts.indices is not None:  # 지수 이름은 오래 걸리는 처리 전에 검사하고 정리해 둠
         opts = replace(opts, indices=normalize_selection(opts.indices))
+    opts = replace(opts, water=wat.normalize_mode(opts.water))
     folder = Path(folder)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -129,6 +132,38 @@ def run_ortho(folder: Path, out_dir: Path, opts: OrthoOptions, out: Emitter) -> 
         if scan["summary"]["oblique"]:
             warnings.append(f"경사 촬영 영상 {scan['summary']['oblique']}장 포함")
 
+        # 1) 수면 판별: 넓은 수면이 있으면 수면의 특징점을 빼고(정합 안정), DSM에서 수면을 평면으로 덮음
+        water_info, water_masks = None, None
+        water_dir = Project(out_dir).dir / "water"
+        shutil.rmtree(water_dir, ignore_errors=True)
+        if ms_ds is None and opts.water != "off":
+            t0 = time.perf_counter()
+            out.stage("water", "수면 판별")
+            det = wat.detect(image_dir, [im["file"] for im in images], out, opts.sfm.num_threads)
+            active = wat.decide(opts.water, det)
+            water_info = {
+                "mode": opts.water,
+                "active": active,
+                "image_fraction": round(det.fraction, 4),
+                "images_with_water": det.images_with_water,
+                **det.stats,
+            }
+            if active:
+                water_masks = det.masks
+                wat.save_masks(det.masks, water_dir)
+                sizes = {im["file"]: (im["width"], im["height"]) for im in images if im.get("width")}
+                n_masked = wat.write_feature_masks(det.masks, sizes, work / "masks")
+                water_info["feature_masked_images"] = n_masked
+                if n_masked:
+                    sfm_opts = replace(sfm_opts, mask_dir=work / "masks")
+            out.log(
+                f"수면 비율 {det.fraction * 100:.1f}% (수면이 보이는 영상 {det.images_with_water}장) → "
+                + ("수면 처리 켬" if active else "수면 처리 안 함")
+            )
+            timings["water_s"] = time.perf_counter() - t0
+        elif ms_ds is not None and opts.water == "on":
+            warnings.append("다중분광 영상에는 아직 수면 처리를 적용하지 않음")
+
         try:
             rec, sfm_stats, geo = _align(
                 image_dir, images, gps, work, replace(opts, sfm=sfm_opts), out, timings, warnings,
@@ -140,7 +175,11 @@ def run_ortho(folder: Path, out_dir: Path, opts: OrthoOptions, out: Emitter) -> 
                 shutil.rmtree(work, ignore_errors=True)
 
         # 3~5) 간이 DSM → 정사투영 → COG
-        products = render_products(rec, image_dir, out_dir, geo.projector.epsg, opts, out, timings, ms_ds=ms_ds)
+        products = render_products(
+            rec, image_dir, out_dir, geo.projector.epsg, opts, out, timings, ms_ds=ms_ds, water_masks=water_masks
+        )
+        if water_info is not None:
+            products["water"] = {**water_info, **products.get("water", {})}
 
     timings["total_s"] = time.perf_counter() - t_start
     report = {
@@ -197,7 +236,8 @@ def _align(folder, images, gps, work, opts, out, timings, warnings, ms_source=No
     # 이후 정사 모자이크 단계에서 실패하면 이 상태(정렬 결과만 있음)에서 run_render로 이어서 만들 수 있다.
     Project(out_dir).save_base(rec, geo.projector.epsg, geo.origin)
     Project(out_dir).save_meta(
-        folder, gps, __version__, render={"gsd_m": opts.gsd_m, "gsd_scale": opts.gsd_scale, "indices": opts.indices},
+        folder, gps, __version__, render={"gsd_m": opts.gsd_m, "gsd_scale": opts.gsd_scale, "indices": opts.indices,
+                "water": opts.water},
         ms_source=ms_source
     )
     (out_dir / "report.json").unlink(missing_ok=True)
@@ -226,7 +266,17 @@ def render_options(meta: dict) -> OrthoOptions:
     except ValueError:
         ver = (0,)
     scale = render.get("gsd_scale", 1.0) if ver >= (0, 3, 0) else 1.0
-    return OrthoOptions(gsd_m=render.get("gsd_m"), gsd_scale=scale, indices=render.get("indices"))
+    # v0.5.0 이전 프로젝트는 수면 처리 없이 만들었으므로(수면 마스크도 없음) 끔
+    water = render.get("water", "off") if ver >= (0, 5, 0) else "off"
+    return OrthoOptions(gsd_m=render.get("gsd_m"), gsd_scale=scale, indices=render.get("indices"), water=water)
+
+
+def water_masks_from_project(proj: Project, opts: OrthoOptions) -> "dict | None":
+    """정사 모자이크를 만들 때 수면 처리를 켰으면 저장된 수면 마스크를 다시 쓴다 (다시 판별하지 않음)."""
+    if opts.water == "off":
+        return None
+    masks = wat.load_masks(proj.dir / "water")
+    return masks or None
 
 
 def align_report_from_project(proj: Project) -> dict:
@@ -293,11 +343,13 @@ def run_render(ortho_dir: Path, out: Emitter) -> dict:
     with PeakMemory() as mem:
         products = render_products(
             to_absolute(rec, frame), image_dir, proj.ortho_dir, frame.epsg, opts, out, timings,
-            ms_ds=ms_dataset_from_meta(meta),
+            ms_ds=ms_dataset_from_meta(meta), water_masks=water_masks_from_project(proj, opts),
         )
     timings["total_s"] = time.perf_counter() - t_start
     report = dict(base)
     report.update(products)
+    if "water" in products and isinstance(base.get("water"), dict):
+        report["water"] = {**base["water"], **products["water"]}  # 판별 정보(방식·수면 비율)는 처음 실행 값
     report["engine_version"] = __version__
     report["timings_s"] = {k: round(v, 2) for k, v in timings.items()}
     report["peak_memory_mb"] = round(mem.peak / 1024 / 1024, 1)
@@ -321,8 +373,11 @@ def render_products(
     out: Emitter,
     timings: dict[str, float],
     ms_ds: "msp.MsDataset | None" = None,
+    water_masks: "dict | None" = None,
 ) -> dict:
     """투영 좌표(절대값) 재구성으로 간이 DSM, 정사 모자이크(COG), 미리보기를 만든다.
+
+    water_masks(영상별 수면 마스크)가 있으면 DSM의 수면 칸을 물가 높이의 평면으로 덮는다.
 
     ms_ds가 있으면 다중분광: 정사 모자이크는 밴드별 반사율(float32), 식생지수 GeoTIFF를 함께 만든다.
 
@@ -351,6 +406,15 @@ def render_products(
     # 점 간격의 절반 격자 (예전 1.5배 격자 + 강한 평활화는 갈대·관목·작은 기복의 높이를 지워 영상 간 어긋남을 키웠음)
     dsm_res = max(0.5, 0.5 * math.sqrt(area / len(pts)))
     dsm = build_dsm(pts, bounds, dsm_res)
+    water_stats = None
+    if water_masks and ms_ds is None:
+        wmask, level, water_stats = wat.ground_water(views, dsm, water_masks, pts)
+        if wmask.any():
+            dsm = wat.flatten(dsm, wmask, level)
+            lv = sorted({round(float(x), 2) for x in np.unique(level[wmask])})
+            out.log(f"수면 {water_stats['area_m2']:.0f} m²를 평면(높이 {', '.join(f'{x:.2f}' for x in lv)} m)으로 덮음")
+        else:
+            out.log("수면으로 확정한 곳 없음 (수면 후보 안에 3D 점이 많거나 주변보다 높음)")
     _write_dsm(dsm, out_dir / "dsm.tif", crs)
     timings["dsm_s"] = time.perf_counter() - t0
 
@@ -405,7 +469,7 @@ def render_products(
     _write_preview(final, out_dir / "preview.png")
     corners = _corners_lonlat(final)
     timings["finalize_s"] = time.perf_counter() - t0
-    return {
+    result = {
         "dsm": {"resolution_m": dsm_res, "num_points": dsm.num_points},
         "ortho": {**ortho_stats, "source_gsd_m": src_gsd},
         "outputs": {
@@ -415,6 +479,9 @@ def render_products(
         },
         "preview_corners_lonlat": corners,
     }
+    if water_stats is not None:
+        result["water"] = {"active": True, **water_stats}
+    return result
 
 
 def _render_ms(views, sources, ds, radiometry, dsm, dsm_res, bounds, crs, gsd, src_gsd, bgsd, out_dir, opts, out, timings):

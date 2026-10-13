@@ -298,6 +298,7 @@ pub fn start_ortho<R: Runtime>(
     folder: String,
     gsd_scale: Option<f64>,
     indices: Option<Vec<String>>,
+    water: Option<String>,
 ) -> Result<JobInfo, String> {
     let folder = PathBuf::from(folder);
     let out = default_output_dir(&folder, "ortho")?;
@@ -315,6 +316,11 @@ pub fn start_ortho<R: Runtime>(
         // 다중분광 지수 (RGB 영상이면 엔진이 무시함). 빈 목록은 "만들지 않음"
         argv.push("--indices".into());
         argv.push(index_list_arg(&list)?);
+    }
+    if let Some(mode) = water {
+        // 수면 처리 (다중분광이면 엔진이 무시함)
+        argv.push("--water".into());
+        argv.push(water_mode_arg(&mode)?);
     }
     let job_id = submit(&app, &state, argv)?;
     Ok(JobInfo { job_id, output_dir: out.to_string_lossy().into() })
@@ -351,6 +357,14 @@ fn index_list_arg(list: &[String]) -> Result<String, String> {
         Ok(joined)
     } else {
         Err("지수 이름이 올바르지 않음".into())
+    }
+}
+
+/// 수면 처리 방식 → 엔진 인자 (auto, on, off)
+fn water_mode_arg(mode: &str) -> Result<String, String> {
+    match mode {
+        "auto" | "on" | "off" => Ok(mode.to_string()),
+        _ => Err(format!("수면 처리 방식이 올바르지 않음: {mode}")),
     }
 }
 
@@ -446,7 +460,15 @@ pub fn engine_status<R: Runtime>(app: AppHandle<R>, state: State<EngineState>) -
 
 #[cfg(test)]
 mod task_tests {
-    use super::{index_list_arg, validate_project_task};
+    use super::{index_list_arg, validate_project_task, water_mode_arg};
+
+    #[test]
+    fn water_mode_values() {
+        assert_eq!(water_mode_arg("auto").unwrap(), "auto");
+        assert_eq!(water_mode_arg("off").unwrap(), "off");
+        assert!(water_mode_arg("on --x").is_err());
+        assert!(water_mode_arg("").is_err());
+    }
 
     #[test]
     fn project_task_whitelist() {

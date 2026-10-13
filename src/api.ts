@@ -65,11 +65,28 @@ export type OrthoResult = {
     index_preview?: string;
   };
   multispectral?: MultispectralInfo;
+  water?: WaterInfo;
   preview_corners_lonlat: Corners;
   timings_s: { total_s: number };
   peak_memory_mb: number;
   warnings: string[];
   refine?: RefineInfo;
+};
+
+export type WaterMode = "auto" | "on" | "off";
+
+/** 수면 처리 결과 (v0.5.0부터, RGB 영상) */
+export type WaterInfo = {
+  mode?: WaterMode;
+  active: boolean;
+  /** 영상 면적 중 수면 비율 (자동 판별 근거) */
+  image_fraction?: number;
+  images_with_water?: number;
+  feature_masked_images?: number;
+  /** DSM에서 평면으로 덮은 수면 면적 */
+  area_m2?: number;
+  water_components?: number;
+  detail?: { area_m2: number; water: boolean; level_m?: number | null }[];
 };
 
 export type MultispectralInfo = {
@@ -103,8 +120,8 @@ export const onEngineReady = (cb: (r: EngineReady) => void) =>
   listen<EngineReady>("engine://ready", (e) => cb(e.payload));
 export const startPreview = (folder: string, quicklook: boolean) =>
   invoke<JobInfo>("start_preview", { folder, quicklook });
-export const startOrtho = (folder: string, gsdScale?: number, indices?: string[]) =>
-  invoke<JobInfo>("start_ortho", { folder, gsdScale, indices });
+export const startOrtho = (folder: string, gsdScale?: number, indices?: string[], water?: WaterMode) =>
+  invoke<JobInfo>("start_ortho", { folder, gsdScale, indices, water });
 export const cancelEngine = (jobId: number) => invoke<void>("cancel_engine", { jobId });
 export const readPng = (path: string) => invoke<string>("read_png_data_url", { path });
 export const readJson = <T>(path: string) => invoke<T>("read_result_json", { path });
@@ -347,6 +364,7 @@ export const STAGE_LABELS: Record<string, string> = {
   features: "특징점 추출",
   matching: "영상 매칭",
   mapping: "카메라 위치·자세 추정",
+  water: "수면 판별",
   georef: "좌표 정렬",
   dsm: "간이 DSM",
   bands: "밴드 정합·반사율 보정",

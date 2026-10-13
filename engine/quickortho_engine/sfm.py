@@ -34,6 +34,8 @@ class SfmOptions:
     camera_model: str | None = None
     camera_params: str | None = None
     fixed_intrinsics: bool = False
+    # 특징점을 뽑지 않을 영역 마스크 폴더 (<영상 이름>.png, 검정=제외). 수면 처리에서 씀
+    mask_dir: Path | None = None
 
 
 class _RowCounter:
@@ -120,6 +122,8 @@ def run_sfm(
     reader.camera_model = opts.camera_model or "OPENCV"
     if opts.camera_params:
         reader.camera_params = opts.camera_params
+    if opts.mask_dir is not None:
+        reader.mask_path = str(opts.mask_dir)
     _run_with_progress(
         lambda: pycolmap.extract_features(
             db_path,

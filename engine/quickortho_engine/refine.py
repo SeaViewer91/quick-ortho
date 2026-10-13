@@ -304,7 +304,7 @@ def gcp_table(rec: pycolmap.Reconstruction, gcps: list[dict], frame: Frame) -> t
 
 
 def run_refine(ortho_dir: Path, out: Emitter, reset: bool = False) -> dict:
-    from .pipeline import PeakMemory, ms_dataset_from_meta, render_options, render_products
+    from .pipeline import PeakMemory, ms_dataset_from_meta, render_options, render_products, water_masks_from_project
 
     t_start = time.perf_counter()
     proj = Project(ortho_dir)
@@ -462,12 +462,14 @@ def run_refine(ortho_dir: Path, out: Emitter, reset: bool = False) -> dict:
         opts = render_options(meta)
         products = render_products(
             to_absolute(rec, frame), image_dir, proj.ortho_dir, frame.epsg, opts, out, timings,
-            ms_ds=ms_dataset_from_meta(meta),
+            ms_ds=ms_dataset_from_meta(meta), water_masks=water_masks_from_project(proj, opts),
         )
 
     timings["total_s"] = time.perf_counter() - t_start
     report = dict(base_report)
     report.update(products)
+    if "water" in products and isinstance(base_report.get("water"), dict):
+        report["water"] = {**base_report["water"], **products["water"]}  # 판별 정보(방식·수면 비율)는 처음 실행 값
     report["engine_version"] = __version__
     if mode != "base":
         report["georef"] = {

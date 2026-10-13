@@ -24,6 +24,8 @@ import {
   type MultispectralInfo,
   type OrthoResult,
   type PreviewResult,
+  type WaterInfo,
+  type WaterMode,
 } from "./api";
 import MapView, { type Layers, type Overlay } from "./MapView";
 import RefineView from "./refine/RefineView";
@@ -50,6 +52,16 @@ const loadIndexSel = (): string[] | null => {
   }
 };
 
+const WATER_KEY = "quickortho.water";
+const loadWaterMode = (): WaterMode => {
+  try {
+    const v = localStorage.getItem(WATER_KEY);
+    return v === "on" || v === "off" ? v : "auto";
+  } catch {
+    return "auto";
+  }
+};
+
 const fmtArea = (m2: number) => (m2 >= 10000 ? `${(m2 / 10000).toFixed(2)} ha` : `${Math.round(m2)} m²`);
 const fmtRange = (a: number, b: number) =>
   Math.round(a) === Math.round(b) ? `${Math.round(a)}` : `${Math.round(a)}~${Math.round(b)}`;
@@ -73,6 +85,8 @@ function App() {
   const [activeIndex, setActiveIndex] = useState<string | null>(null);
   /** 만들 지수 (마지막 선택을 기억, 없으면 기본값) */
   const [indexSel, setIndexSel] = useState<string[] | null>(loadIndexSel);
+  /** 수면 처리 (자동·켬·끔, 마지막 선택을 기억) */
+  const [waterMode, setWaterMode] = useState<WaterMode>(loadWaterMode);
   const [geojson, setGeojson] = useState<FeatureCollection>();
   const [layers, setLayers] = useState<Layers>({
     quicklook: true,
@@ -172,6 +186,15 @@ function App() {
     const avail = new Set((options ?? []).filter((o) => o.available).map((o) => o.name));
     const base = indexSel ?? (options ?? []).filter((o) => o.default).map((o) => o.name);
     return base.filter((n) => avail.size === 0 || avail.has(n));
+  }
+
+  function changeWaterMode(next: WaterMode) {
+    setWaterMode(next);
+    try {
+      localStorage.setItem(WATER_KEY, next);
+    } catch {
+      // 저장 못 해도 이번 실행에는 반영됨
+    }
   }
 
   function changeIndexSel(next: string[]) {
@@ -302,7 +325,7 @@ function App() {
     try {
       const ms = preview?.multispectral;
       const res = await runJob<OrthoResult>(
-        () => startOrtho(folder, undefined, ms ? chosenIndices(ms.indices) : undefined),
+        () => startOrtho(folder, undefined, ms ? chosenIndices(ms.indices) : undefined, ms ? undefined : waterMode),
         onEvent,
         (j) => (jobRef.current = j.job_id),
       );
@@ -420,13 +443,15 @@ function App() {
                 <dd>{preview.time_s.toFixed(1)}초</dd>
               </dl>
               <Warnings items={preview.warnings} />
-              {preview.multispectral && (
+              {preview.multispectral ? (
                 <IndexPicker
                   options={preview.multispectral.indices}
                   selected={chosenIndices(preview.multispectral.indices)}
                   onChange={changeIndexSel}
                   disabled={busy !== null}
                 />
+              ) : (
+                <WaterPicker value={waterMode} onChange={changeWaterMode} disabled={busy !== null} />
               )}
               <div className="actions">
                 <button type="button" className="secondary" onClick={makeQuicklook} disabled={busy !== null}>
@@ -491,6 +516,7 @@ function App() {
                   </>
                 ) : null}
                 {ortho.multispectral && <MultispectralStats ms={ortho.multispectral} />}
+                {ortho.water && <WaterStats w={ortho.water} />}
                 <dt>처리 시간</dt>
                 <dd>{ortho.timings_s?.total_s != null ? `${Math.round(ortho.timings_s.total_s)}초` : "-"}</dd>
                 <dt>최대 메모리</dt>
@@ -662,6 +688,46 @@ function MultispectralStats({ ms }: { ms: MultispectralInfo }) {
           <dd>잔차 {align.toFixed(2)} px</dd>
         </>
       )}
+    </>
+  );
+}
+
+const WATER_OPTIONS: { value: WaterMode; label: string; title: string }[] = [
+  { value: "auto", label: "자동", title: "영상 면적의 5% 이상이 수면이면 켬" },
+  { value: "on", label: "켬", title: "바다·호수·저수지가 찍힌 비행" },
+  { value: "off", label: "끔", title: "수면이 없거나, 수면 판별이 잘못될 때 (v0.4 이전과 같은 처리)" },
+];
+
+function WaterPicker({ value, onChange, disabled }: { value: WaterMode; onChange: (v: WaterMode) => void; disabled: boolean }) {
+  return (
+    <fieldset className="index-picker water-picker" disabled={disabled}>
+      <legend>수면 처리</legend>
+      {WATER_OPTIONS.map((o) => (
+        <label key={o.value} title={o.title}>
+          <input type="radio" name="water-mode" checked={value === o.value} onChange={() => onChange(o.value)} />
+          {o.label}
+        </label>
+      ))}
+      <p className="muted small">바다·호수에서 파도 무늬의 특징점을 빼고, 수면을 물가 높이의 평면으로 처리해 어긋남을 줄임</p>
+    </fieldset>
+  );
+}
+
+function WaterStats({ w }: { w: WaterInfo }) {
+  const pct = typeof w.image_fraction === "number" ? `수면 ${(w.image_fraction * 100).toFixed(0)}%` : null;
+  const levels = (w.detail ?? []).filter((d) => d.water && typeof d.level_m === "number").map((d) => d.level_m as number);
+  const auto = w.mode === "auto" ? " (자동)" : "";
+  let text: string;
+  if (!w.active) text = `안 함${pct ? ` (${pct})` : ""}`;
+  else if (w.area_m2) text = `켬${auto} · ${fmtArea(w.area_m2)}`;
+  else text = `켬${auto} · 확정한 수면 없음`;
+  const title = levels.length
+    ? `수면을 물가 높이 ${levels.map((x) => x.toFixed(1)).join(", ")} m의 평면으로 처리함`
+    : "영상 면적 중 수면 비율로 자동 판별";
+  return (
+    <>
+      <dt>수면 처리</dt>
+      <dd title={title}>{text}</dd>
     </>
   );
 }
